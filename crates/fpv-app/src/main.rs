@@ -42,6 +42,11 @@ async fn save_project(state: State<'_, AppState>, path: String) -> AppResult<()>
 }
 
 #[tauri::command]
+fn probe_media(state: State<'_, AppState>, path: String) -> AppResult<fpv_media::MediaInfo> {
+    app_error(state.probe_media(&PathBuf::from(path)))
+}
+
+#[tauri::command]
 async fn configure_ai(state: State<'_, AppState>, config: ProviderConfig) -> AppResult<()> {
     state.configure_ai(config).await;
     Ok(())
@@ -68,6 +73,7 @@ fn main() {
             redo,
             load_project,
             save_project,
+            probe_media,
             configure_ai,
             test_ai_connection,
             chat

@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{MediaError, MediaResult};
 use crate::process;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MediaInfo {
     pub duration_us: i64,
     pub width: u32,
