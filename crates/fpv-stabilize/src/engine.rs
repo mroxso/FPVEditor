@@ -64,7 +64,13 @@ impl StabilizationEngine {
         let mut rotation = Quaternion::slerp(Quaternion::IDENTITY, full_correction, strength);
 
         if self.profile.horizon_lock {
-            let horizon = horizon_lock_correction(raw_orientation, 1.0);
+            // Derive the correction from the orientation it will actually be
+            // composed onto (`rotation * raw_orientation`), not from
+            // `raw_orientation` alone — otherwise it cancels the wrong
+            // quaternion's roll whenever `rotation` itself isn't identity
+            // (i.e. whenever strength > 0) and the horizon ends up not level.
+            let stabilized = (rotation * raw_orientation).normalized();
+            let horizon = horizon_lock_correction(stabilized, 1.0);
             rotation = (horizon * rotation).normalized();
         }
 
@@ -191,6 +197,36 @@ mod tests {
         let profile = StabilizationProfile {
             smoothness: 0.0,
             strength: 0.0,
+            horizon_lock: true,
+            dynamic_fov: 0.0,
+        };
+        let engine = StabilizationEngine::new(&samples, profile).unwrap();
+        let transform = engine.frame_transform(t - 16_667);
+        let raw = engine.raw.orientation_at(t - 16_667);
+        let combined = (transform.rotation * raw).normalized();
+        let (roll, _, _) = combined.to_euler_rpy();
+        assert!(roll.abs() < 1e-6, "roll={roll}");
+    }
+
+    #[test]
+    fn horizon_lock_zeroes_roll_even_when_smoothing_strength_is_nonzero() {
+        // Same pure-roll gyro as the strength=0 case above, but now with
+        // smoothing strength > 0 so the composed `rotation` is itself
+        // non-identity — the case the horizon-lock/strength composition bug
+        // only showed up in.
+        let mut t = 0i64;
+        let mut samples = Vec::new();
+        for i in 0..10 {
+            let roll = (i as f64) * 0.05;
+            samples.push(GyroSample {
+                timestamp_us: t,
+                gyro: [roll, 0.0, 0.0],
+            });
+            t += 16_667;
+        }
+        let profile = StabilizationProfile {
+            smoothness: 0.9,
+            strength: 0.7,
             horizon_lock: true,
             dynamic_fov: 0.0,
         };

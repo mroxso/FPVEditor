@@ -6,7 +6,7 @@ for the full design; this file tracks what's actually implemented on this branch
 ## Status
 
 All timeline-mutation, stabilization, media, and AI-agent logic described in PLAN.md
-is implemented as a Cargo workspace with real, passing tests (99 tests, no `#[ignore]`s;
+is implemented as a Cargo workspace with real, passing tests (119 tests, no `#[ignore]`s;
 a few skip themselves at runtime with a printed message if `ffmpeg`/a GPU adapter isn't
 available in the environment, but both are exercised for real in this repo's dev setup).
 
@@ -14,8 +14,8 @@ available in the environment, but both are exercised for real in this repo's dev
 |---|---|---|
 | `fpv-core` | ✅ | Project/timeline data model, `Command` enum, `CommandBus` with undo/redo, JSON project files |
 | `fpv-media` | ✅ | `ffprobe`/`ffmpeg` CLI wrapper: probing, clip export (trim/LUT/crop/speed filters), proxy generation |
-| `fpv-stabilize` | ✅ | Quaternion math, gyro-log integration, EMA smoothing, horizon lock, rolling-shutter correction, lens distortion model |
-| `fpv-gpu` | ✅ | `.cube` LUT parsing + trilinear sampling, color grading math, stabilization reprojection math, a real `wgpu` compute pipeline (Metal-backed here) checked against the CPU reference |
+| `fpv-stabilize` | ⚠️ partial | Quaternion math, gyro-log integration, EMA smoothing, horizon lock, rolling-shutter correction, lens distortion model — all real and tested. **Not yet wired into export**: `export_clip` reserves the `dynamic_fov` crop but never invokes `StabilizationEngine`/`fpv-gpu`'s warp, so exported clips are cropped but not actually de-shaken (see `crates/fpv-media/src/export.rs`); a GUI/CLI-driven frame-by-frame render path is follow-up work. |
+| `fpv-gpu` | ✅ | `.cube` LUT parsing + trilinear sampling, color grading math, stabilization reprojection math, a real `wgpu` compute pipeline (Metal-backed here) checked against the CPU reference — not yet called from the export path, see `fpv-stabilize` above |
 | `fpv-ai` | ✅ | Configurable OpenAI-compatible client (`async-openai`), the shared tool catalog (PLAN.md §4.2), and the tool-calling agent loop — tested against a local mock HTTP server, no network/API key needed |
 | `fpv-mcp` | ✅ | A real MCP server (`rmcp`) exposing the same tool catalog to external agents (e.g. Claude Code) over stdio; tested with a real MCP client round-tripping over an in-memory pipe |
 | `fpv-cli` | ✅ | Headless `fpv` binary: `new/add-track/add-clip/trim-clip/split-clip/stabilize/apply-lut/list/show/probe/export/mcp-serve`, tested by driving the built binary as a subprocess |
@@ -28,7 +28,7 @@ AI integrations — is implemented and tested, not stubbed.
 ## Building & testing
 
 ```sh
-cargo test --workspace     # 99 tests
+cargo test --workspace     # 119 tests
 cargo clippy --workspace --all-targets
 ```
 

@@ -48,6 +48,29 @@ pub fn catalog() -> Vec<ToolSpec> {
             parameters: json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         },
         ToolSpec {
+            name: "add_track",
+            description: "Add a new track (video or audio) to the project.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "enum": ["Video", "Audio"] },
+                    "name": { "type": "string" }
+                },
+                "required": ["kind", "name"]
+            }),
+        },
+        ToolSpec {
+            name: "remove_track",
+            description: "Remove an empty track from the project.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "track_id": { "type": "string" }
+                },
+                "required": ["track_id"]
+            }),
+        },
+        ToolSpec {
             name: "add_clip",
             description: "Add a new clip to a track.",
             parameters: json!({
@@ -66,6 +89,17 @@ pub fn catalog() -> Vec<ToolSpec> {
                     }
                 },
                 "required": ["track_id", "clip"]
+            }),
+        },
+        ToolSpec {
+            name: "remove_clip",
+            description: "Remove a clip from the project entirely.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "clip_id": { "type": "string" }
+                },
+                "required": ["clip_id"]
             }),
         },
         ToolSpec {
@@ -104,6 +138,19 @@ pub fn catalog() -> Vec<ToolSpec> {
                     "new_index": { "type": "integer" }
                 },
                 "required": ["track_id", "clip_id", "new_index"]
+            }),
+        },
+        ToolSpec {
+            name: "move_clip",
+            description: "Move a clip to a different track and/or timeline position.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "clip_id": { "type": "string" },
+                    "new_track_id": { "type": "string" },
+                    "new_position": { "type": "integer", "description": "microseconds" }
+                },
+                "required": ["clip_id", "new_track_id", "new_position"]
             }),
         },
         ToolSpec {
@@ -161,6 +208,40 @@ pub fn catalog() -> Vec<ToolSpec> {
                 "required": ["clip_id", "keyframes"]
             }),
         },
+        ToolSpec {
+            name: "add_text_overlay",
+            description: "Add a text overlay to a clip, positioned in normalized 0..1 coordinates.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "clip_id": { "type": "string" },
+                    "overlay": {
+                        "type": "object",
+                        "properties": {
+                            "text": { "type": "string" },
+                            "start": { "type": "integer", "description": "microseconds" },
+                            "end": { "type": "integer", "description": "microseconds" },
+                            "x": { "type": "number" },
+                            "y": { "type": "number" }
+                        },
+                        "required": ["text", "start", "end", "x", "y"]
+                    }
+                },
+                "required": ["clip_id", "overlay"]
+            }),
+        },
+        ToolSpec {
+            name: "add_osd_overlay",
+            description: "Overlay the clip's flight-controller OSD telemetry, decoded from the given source format.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "clip_id": { "type": "string" },
+                    "source": { "type": "string", "enum": ["Betaflight", "Inav", "WalkSnail", "Hdzero"] }
+                },
+                "required": ["clip_id", "source"]
+            }),
+        },
     ]
 }
 
@@ -190,9 +271,8 @@ pub fn dispatch(bus: &mut CommandBus, tool_name: &str, args: Value) -> Result<Va
     match tool_name {
         "list_clips" => Ok(json!(bus.project().clips.values().collect::<Vec<_>>())),
         "get_timeline_state" => Ok(json!(bus.project())),
-        "add_clip" | "trim_clip" | "split_clip" | "reorder_clip" | "apply_stabilization"
-        | "apply_lut" | "set_speed_ramp" => {
-            let command = args_to_command(tool_name, args)?;
+        other if catalog().iter().any(|spec| spec.name == other) => {
+            let command = args_to_command(other, args)?;
             bus.execute(command)?;
             Ok(json!(bus.project()))
         }
@@ -292,6 +372,77 @@ mod tests {
         let profile = clip.stabilization.unwrap();
         assert!((profile.smoothness - 0.6).abs() < 1e-6);
         assert!(profile.horizon_lock);
+    }
+
+    #[test]
+    fn catalog_covers_every_command_variant() {
+        // Every mutating tool name must deserialize into some `Command`
+        // variant via `args_to_command`'s `command` tag, so the catalog
+        // can't silently drift behind `Command` as variants are added.
+        let names: Vec<&str> = catalog().into_iter().map(|t| t.name).collect();
+        for expected in [
+            "add_track",
+            "remove_track",
+            "add_clip",
+            "remove_clip",
+            "trim_clip",
+            "split_clip",
+            "reorder_clip",
+            "move_clip",
+            "apply_stabilization",
+            "apply_lut",
+            "set_speed_ramp",
+            "add_text_overlay",
+            "add_osd_overlay",
+        ] {
+            assert!(names.contains(&expected), "catalog is missing tool {expected}");
+        }
+    }
+
+    #[test]
+    fn dispatching_add_track_creates_a_track_from_a_fresh_project() {
+        let mut bus = CommandBus::new(Project::new("test"));
+        let result = dispatch(
+            &mut bus,
+            "add_track",
+            json!({ "kind": "Video", "name": "V1" }),
+        )
+        .unwrap();
+        assert_eq!(bus.project().tracks.len(), 1);
+        assert_eq!(result["tracks"][0]["name"], "V1");
+    }
+
+    #[test]
+    fn dispatching_move_clip_relocates_a_clip_to_another_track() {
+        let (mut bus, track_id) = bus_with_track();
+        dispatch(
+            &mut bus,
+            "add_track",
+            json!({ "kind": "Video", "name": "V2" }),
+        )
+        .unwrap();
+        let track2_id = bus.project().tracks[1].id;
+
+        dispatch(
+            &mut bus,
+            "add_clip",
+            json!({
+                "track_id": track_id,
+                "clip": { "source_path": "a.mp4", "in_point": 0, "out_point": 1_000_000, "position": 0 }
+            }),
+        )
+        .unwrap();
+        let clip_id = bus.project().tracks[0].clip_order[0];
+
+        dispatch(
+            &mut bus,
+            "move_clip",
+            json!({ "clip_id": clip_id, "new_track_id": track2_id, "new_position": 5_000_000 }),
+        )
+        .unwrap();
+
+        assert!(bus.project().tracks[0].clip_order.is_empty());
+        assert_eq!(bus.project().tracks[1].clip_order, vec![clip_id]);
     }
 
     #[test]

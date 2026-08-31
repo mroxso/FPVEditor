@@ -50,19 +50,24 @@ pub fn parse_ffprobe_json(json: &str) -> MediaResult<MediaInfo> {
         .find(|s| s.codec_type == "video")
         .ok_or_else(|| MediaError::Parse("no video stream found".to_string()))?;
 
-    let fps = video
-        .r_frame_rate
-        .as_deref()
-        .and_then(parse_frame_rate)
-        .unwrap_or(0.0);
+    // A missing field is a legitimate corner case for some containers, but a
+    // *present-but-unparseable* value (e.g. ffprobe's "N/A") means something
+    // is wrong with the source, so that case is a hard error rather than a
+    // silent 0 that downstream code could mistake for a genuinely zero-length
+    // or zero-fps file.
+    let fps = match video.r_frame_rate.as_deref() {
+        Some(raw) => parse_frame_rate(raw)
+            .ok_or_else(|| MediaError::Parse(format!("unparseable frame rate: {raw:?}")))?,
+        None => 0.0,
+    };
 
-    let duration_us = parsed
-        .format
-        .duration
-        .as_deref()
-        .and_then(|d| d.parse::<f64>().ok())
-        .map(|secs| (secs * 1_000_000.0).round() as i64)
-        .unwrap_or(0);
+    let duration_us = match parsed.format.duration.as_deref() {
+        Some(raw) => raw
+            .parse::<f64>()
+            .map(|secs| (secs * 1_000_000.0).round() as i64)
+            .map_err(|_| MediaError::Parse(format!("unparseable duration: {raw:?}")))?,
+        None => 0,
+    };
 
     Ok(MediaInfo {
         duration_us,
@@ -151,6 +156,18 @@ mod tests {
     #[test]
     fn missing_video_stream_is_an_error() {
         let json = r#"{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1.0"}}"#;
+        assert!(parse_ffprobe_json(json).is_err());
+    }
+
+    #[test]
+    fn non_numeric_duration_is_an_error_not_a_silent_zero() {
+        let json = r#"{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":480,"r_frame_rate":"30/1"}],"format":{"duration":"N/A"}}"#;
+        assert!(parse_ffprobe_json(json).is_err());
+    }
+
+    #[test]
+    fn non_numeric_frame_rate_is_an_error_not_a_silent_zero() {
+        let json = r#"{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":480,"r_frame_rate":"0/0"}],"format":{"duration":"1.0"}}"#;
         assert!(parse_ffprobe_json(json).is_err());
     }
 

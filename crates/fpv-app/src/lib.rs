@@ -5,9 +5,13 @@
 //! here so the wiring is verified without needing a windowing/webview
 //! runtime, which this environment doesn't have.
 //!
-//! The internal AI agent panel and the MCP server both drive the *same*
-//! [`fpv_core::CommandBus`] instance held here, so an edit made by either
-//! is immediately visible to the GUI and vice versa.
+//! The internal AI agent panel drives the *same* [`fpv_core::CommandBus`]
+//! instance held here, so an edit it makes is immediately visible to the
+//! GUI and vice versa. An external MCP server (`fpv mcp-serve`, see
+//! `fpv-mcp`/`fpv-cli`) is a **separate process** with its own `CommandBus`
+//! loaded from the project file — it does not share this instance, so
+//! running the GUI and `mcp-serve` against the same project file
+//! concurrently can silently overwrite one side's edits on save.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

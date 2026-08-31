@@ -79,6 +79,20 @@ pub enum Command {
     },
 }
 
+/// Index at which to insert a clip at `position` into `clip_order` so the
+/// track stays sorted by each clip's timeline position (ties are inserted
+/// after existing clips at the same position).
+fn clip_order_insert_index(
+    clip_order: &[ClipId],
+    clips: &std::collections::HashMap<ClipId, Clip>,
+    position: Timecode,
+) -> usize {
+    clip_order
+        .iter()
+        .position(|id| clips.get(id).is_some_and(|c| c.position > position))
+        .unwrap_or(clip_order.len())
+}
+
 impl Command {
     /// Human-readable summary, e.g. for an undo-history UI or agent transcript.
     pub fn describe(&self) -> String {
@@ -127,13 +141,20 @@ impl Command {
                         source_duration: 0,
                     });
                 }
-                let track = project
-                    .track_mut(*track_id)
-                    .ok_or(CoreError::TrackNotFound(*track_id))?;
                 let mut new_clip =
                     Clip::new(clip.source_path.clone(), clip.in_point, clip.out_point);
                 new_clip.position = clip.position;
-                track.clip_order.push(new_clip.id);
+                let track_idx = project
+                    .tracks
+                    .iter()
+                    .position(|t| t.id == *track_id)
+                    .ok_or(CoreError::TrackNotFound(*track_id))?;
+                let idx = clip_order_insert_index(
+                    &project.tracks[track_idx].clip_order,
+                    &project.clips,
+                    new_clip.position,
+                );
+                project.tracks[track_idx].clip_order.insert(idx, new_clip.id);
                 project.clips.insert(new_clip.id, new_clip);
                 Ok(())
             }
@@ -244,11 +265,17 @@ impl Command {
                 for track in &mut project.tracks {
                     track.clip_order.retain(|c| c != clip_id);
                 }
-                project
-                    .track_mut(*new_track_id)
-                    .unwrap()
-                    .clip_order
-                    .push(*clip_id);
+                let track_idx = project
+                    .tracks
+                    .iter()
+                    .position(|t| t.id == *new_track_id)
+                    .unwrap();
+                let idx = clip_order_insert_index(
+                    &project.tracks[track_idx].clip_order,
+                    &project.clips,
+                    *new_position,
+                );
+                project.tracks[track_idx].clip_order.insert(idx, *clip_id);
                 project.clip_mut(*clip_id).unwrap().position = *new_position;
                 Ok(())
             }
@@ -267,7 +294,10 @@ impl Command {
                 Ok(())
             }
             Command::SetSpeedRamp { clip_id, keyframes } => {
-                if keyframes.is_empty() || !keyframes.windows(2).all(|w| w[0].at < w[1].at) {
+                if keyframes.is_empty()
+                    || !keyframes.windows(2).all(|w| w[0].at < w[1].at)
+                    || keyframes.iter().any(|k| k.rate <= 0.0)
+                {
                     return Err(CoreError::InvalidSpeedRamp);
                 }
                 let clip = project
@@ -291,5 +321,94 @@ impl Command {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::TrackKind;
+
+    fn project_with_track() -> (Project, TrackId) {
+        let mut project = Project::new("test");
+        Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V1".into(),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let track_id = project.tracks[0].id;
+        (project, track_id)
+    }
+
+    fn add_clip_at(project: &mut Project, track_id: TrackId, position_secs: f64) -> ClipId {
+        let before: std::collections::HashSet<ClipId> = project.clips.keys().copied().collect();
+        Command::AddClip {
+            track_id,
+            clip: NewClip {
+                source_path: "a.mp4".into(),
+                in_point: Timecode::ZERO,
+                out_point: Timecode::from_seconds(1.0),
+                position: Timecode::from_seconds(position_secs),
+            },
+        }
+        .apply(project)
+        .unwrap();
+        *project
+            .clips
+            .keys()
+            .find(|id| !before.contains(id))
+            .unwrap()
+    }
+
+    #[test]
+    fn add_clip_inserts_into_clip_order_sorted_by_position_not_call_order() {
+        let (mut project, track_id) = project_with_track();
+        let first = add_clip_at(&mut project, track_id, 10.0);
+        let second = add_clip_at(&mut project, track_id, 0.0);
+        assert_eq!(project.tracks[0].clip_order, vec![second, first]);
+    }
+
+    #[test]
+    fn move_clip_inserts_into_the_destination_tracks_clip_order_by_position() {
+        let (mut project, track_id) = project_with_track();
+        let early = add_clip_at(&mut project, track_id, 0.0);
+        let late = add_clip_at(&mut project, track_id, 10.0);
+
+        Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V2".into(),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let track2_id = project.tracks[1].id;
+        let middle = add_clip_at(&mut project, track2_id, 5.0);
+
+        Command::MoveClip {
+            clip_id: middle,
+            new_track_id: track_id,
+            new_position: Timecode::from_seconds(5.0),
+        }
+        .apply(&mut project)
+        .unwrap();
+
+        assert_eq!(project.tracks[0].clip_order, vec![early, middle, late]);
+        assert!(project.tracks[1].clip_order.is_empty());
+    }
+
+    #[test]
+    fn speed_ramp_with_nonpositive_rate_is_rejected() {
+        let (mut project, track_id) = project_with_track();
+        let clip_id = add_clip_at(&mut project, track_id, 0.0);
+        let err = Command::SetSpeedRamp {
+            clip_id,
+            keyframes: vec![SpeedKeyframe {
+                at: Timecode::ZERO,
+                rate: 0.0,
+            }],
+        }
+        .apply(&mut project)
+        .unwrap_err();
+        assert_eq!(err, CoreError::InvalidSpeedRamp);
     }
 }

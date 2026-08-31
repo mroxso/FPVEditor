@@ -66,11 +66,15 @@ pub async fn run_turn(
                     // Custom (non-function) tool calls aren't part of our catalog.
                     continue;
                 };
-                let args: serde_json::Value =
-                    serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::json!({}));
-                let result = match tools::dispatch(bus, &call.function.name, args) {
-                    Ok(v) => v,
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
+                let result = match serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+                {
+                    Ok(args) => match tools::dispatch(bus, &call.function.name, args) {
+                        Ok(v) => v,
+                        Err(e) => serde_json::json!({ "error": e.to_string() }),
+                    },
+                    Err(e) => serde_json::json!({
+                        "error": format!("malformed JSON in tool call arguments: {e}")
+                    }),
                 };
                 messages.push(
                     ChatCompletionRequestToolMessageArgs::default()
@@ -174,6 +178,52 @@ mod tests {
 
         assert_eq!(reply, "Added the clip.");
         assert_eq!(bus.project().clips.len(), 1, "the tool call should have actually mutated the timeline");
+    }
+
+    #[tokio::test]
+    async fn malformed_tool_call_json_surfaces_a_clear_error_instead_of_a_wrong_field_error() {
+        let server = MockServer::start().await;
+
+        let bad_call = json!({
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "created": 1_700_000_000,
+            "model": "test-model",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": { "name": "add_clip", "arguments": "{not valid json" }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+        });
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(bad_call))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(final_text_response("ok")))
+            .mount(&server)
+            .await;
+
+        let config = ProviderConfig::new(server.uri(), "test-model");
+        let client = AiClient::new(&config);
+        let mut bus = CommandBus::new(Project::new("test"));
+
+        // Should not error out of run_turn: the bad-JSON tool result is fed
+        // back to the model as an error string, same as any other tool error.
+        let reply = run_turn(&client, &mut bus, "add a clip").await.unwrap();
+        assert_eq!(reply, "ok");
     }
 
     #[tokio::test]

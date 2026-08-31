@@ -39,9 +39,13 @@ pub fn export_clip_args(clip: &Clip, settings: &ExportSettings) -> Vec<String> {
     let mut filters: Vec<String> = Vec::new();
 
     if let Some(stab) = &clip.stabilization {
-        // Crop in by fov_scale to hide the warped edges, then scale back up
-        // to the output resolution. The actual per-frame rotational warp is
-        // applied by fpv-gpu at render time; this just reserves the crop.
+        // Crop in by fov_scale to hide the edges a rotational warp would
+        // reveal. NOTE: this only reserves the crop — nothing in the export
+        // path (or anywhere else yet) actually invokes fpv_stabilize's
+        // per-frame rotation or fpv-gpu's warp pipeline, so exported clips
+        // are cropped/zoomed but not actually de-shaken. Wiring frame-by-frame
+        // GPU warp into this ffmpeg-based export pipeline is tracked as
+        // follow-up work.
         let scale = 1.0 + stab.dynamic_fov.clamp(0.0, 1.0);
         let crop_w = (settings.width as f32 / scale) as u32;
         let crop_h = (settings.height as f32 / scale) as u32;
