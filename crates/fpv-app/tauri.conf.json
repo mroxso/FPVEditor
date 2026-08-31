@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FPV Editor",
+  "version": "0.1.0",
+  "identifier": "io.fpv.editor",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../../frontend/dist"
+  },
+  "app": {
+    "windows": [{ "title": "FPV Editor", "width": 1480, "height": 920, "minWidth": 1100, "minHeight": 720, "resizable": true }],
+    "security": { "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; media-src 'self' asset: blob:; connect-src ipc: http://ipc.localhost" }
+  },
+  "bundle": { "active": true, "targets": "all", "icon": [] }
+}

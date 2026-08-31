@@ -12,6 +12,11 @@ tokio = { workspace = true }
 fpv-core = { workspace = true }
 fpv-media = { workspace = true }
 fpv-ai = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 
 [dev-dependencies]
 wiremock = "0.6"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

@@ -19,7 +19,7 @@ available in the environment, but both are exercised for real in this repo's dev
 | `fpv-ai` | ✅ | Configurable OpenAI-compatible client (`async-openai`), the shared tool catalog (PLAN.md §4.2), and the tool-calling agent loop — tested against a local mock HTTP server, no network/API key needed |
 | `fpv-mcp` | ✅ | A real MCP server (`rmcp`) exposing the same tool catalog to external agents (e.g. Claude Code) over stdio; tested with a real MCP client round-tripping over an in-memory pipe |
 | `fpv-cli` | ✅ | Headless `fpv` binary: `new/add-track/add-clip/trim-clip/split-clip/stabilize/apply-lut/list/show/probe/export/mcp-serve`, tested by driving the built binary as a subprocess |
-| `fpv-app` | ⚠️ partial | The application service layer that wires every crate above together behind one `AppState` (what a GUI's IPC handlers would call) — implemented and tested. The actual Tauri window shell and `frontend/` UI (PLAN.md's "modern UI" and roadmap phase 8) are **not** built: this sandbox has no display/webview runtime to build or verify a GUI against, so wiring a real window here would be unverifiable busywork. `fpv-app`'s public API is the seam a Tauri shell wires into directly. |
+| `fpv-app` | ✅ | Tauri 2 desktop shell plus a React/Vite flight-deck interface. The UI drives the same `AppState` command bus through typed IPC for timeline edits, undo/redo, project open/save, AI-provider configuration, connection tests, and chat. |
 
 Everything one layer below the GUI — the command bus, undo/redo, stabilization math,
 media pipeline, LUT/color GPU path, and both the internal-agent and external-agent (MCP)
@@ -31,6 +31,22 @@ AI integrations — is implemented and tested, not stubbed.
 cargo test --workspace     # 119 tests
 cargo clippy --workspace --all-targets
 ```
+
+## Desktop editor
+
+The Tauri application lives in `crates/fpv-app`; its React/Vite frontend is
+in `frontend/`. Install frontend dependencies once, then run the native editor:
+
+```sh
+cd frontend && npm install && cd ..
+cargo run -p fpv-app
+```
+
+For a production frontend artifact, run `npm run build` from `frontend/`.
+The editor gives pilots a media bin, video monitor, multi-track timeline,
+stabilization/color inspector, project open/save controls, and an integrated AI
+copilot panel. All edits flow through the same command API as the CLI and MCP
+server, preserving undo/redo behaviour and project-file compatibility.
 
 Requires `ffmpeg`/`ffprobe` on `PATH` for the full `fpv-media`/`fpv-cli` test coverage
 (installed via `brew install ffmpeg` in this repo's dev environment); those tests print
@@ -60,7 +76,7 @@ Still open, not decided by this implementation pass:
   valid manifest field; PLAN.md explicitly leaves the project's actual license as an open
   decision (interacting with the GPL/LGPL choice of ffmpeg build). Revisit before any
   public release.
-- **Tauri vs. `iced`**: not decided here either, since no UI shell was built this pass.
+- **Tauri vs. `iced`**: Tauri 2 is now the selected desktop shell.
 - **Adopting vs. reimplementing Gyroflow's algorithms**: `fpv-stabilize` here is an
   independent implementation (quaternion integration + EMA smoothing + horizon lock),
   not ported from Gyroflow, so this is moot for what exists — but the broader question
