@@ -1,3 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-export default defineConfig({ plugins: [react()], clearScreen: false, server: { strictPort: true } });
+import tailwindcss from "@tailwindcss/vite";
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  clearScreen: false,
+  server: { strictPort: true },
+  resolve: { alias: { "@": new URL("./src", import.meta.url).pathname } },
+});
