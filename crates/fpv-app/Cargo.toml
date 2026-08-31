@@ -1,0 +1,17 @@
+[package]
+name = "fpv-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+fpv-core = { workspace = true }
+fpv-media = { workspace = true }
+fpv-ai = { workspace = true }
+
+[dev-dependencies]
+wiremock = "0.6"

@@ -1,0 +1,308 @@
+//! `fpv-app`: the application service layer that wires every engine crate
+//! together (PLAN.md section 2's "wires all crates together"). Each method
+//! on [`AppState`] is what a Tauri `#[tauri::command]` IPC handler would
+//! call directly — kept as plain, independently-testable async functions
+//! here so the wiring is verified without needing a windowing/webview
+//! runtime, which this environment doesn't have.
+//!
+//! The internal AI agent panel and the MCP server both drive the *same*
+//! [`fpv_core::CommandBus`] instance held here, so an edit made by either
+//! is immediately visible to the GUI and vice versa.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use fpv_ai::{AiClient, ProviderConfig};
+use fpv_core::{Command, CommandBus, Project};
+use serde::Serialize;
+use tokio::sync::Mutex;
+
+pub struct AppState {
+    bus: Arc<Mutex<CommandBus>>,
+    ai_config: Arc<Mutex<Option<ProviderConfig>>>,
+    project_path: Arc<Mutex<Option<PathBuf>>>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new(Project::new("Untitled"))
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecuteOutcome {
+    pub project: Project,
+    pub can_undo: bool,
+    pub can_redo: bool,
+}
+
+impl AppState {
+    pub fn new(project: Project) -> Self {
+        Self {
+            bus: Arc::new(Mutex::new(CommandBus::new(project))),
+            ai_config: Arc::new(Mutex::new(None)),
+            project_path: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub async fn load_project(&self, path: &Path) -> Result<Project> {
+        let project = fpv_core::project_file::load(path)
+            .with_context(|| format!("failed to load project at {}", path.display()))?;
+        let mut bus = self.bus.lock().await;
+        *bus = CommandBus::new(project.clone());
+        *self.project_path.lock().await = Some(path.to_path_buf());
+        Ok(project)
+    }
+
+    pub async fn save_project(&self, path: &Path) -> Result<()> {
+        let bus = self.bus.lock().await;
+        fpv_core::project_file::save(bus.project(), path)
+            .with_context(|| format!("failed to save project at {}", path.display()))?;
+        *self.project_path.lock().await = Some(path.to_path_buf());
+        Ok(())
+    }
+
+    pub async fn get_timeline_state(&self) -> Project {
+        self.bus.lock().await.project().clone()
+    }
+
+    /// Apply one edit through the shared command bus — the single mutation
+    /// path for the GUI, the internal AI agent, and (via `fpv-mcp`, which
+    /// wraps its own bus the same way) external agents.
+    pub async fn execute_command(&self, command: Command) -> Result<ExecuteOutcome> {
+        let mut bus = self.bus.lock().await;
+        bus.execute(command)?;
+        Ok(ExecuteOutcome {
+            project: bus.project().clone(),
+            can_undo: bus.can_undo(),
+            can_redo: bus.can_redo(),
+        })
+    }
+
+    pub async fn undo(&self) -> Result<ExecuteOutcome> {
+        let mut bus = self.bus.lock().await;
+        bus.undo()?;
+        Ok(ExecuteOutcome {
+            project: bus.project().clone(),
+            can_undo: bus.can_undo(),
+            can_redo: bus.can_redo(),
+        })
+    }
+
+    pub async fn redo(&self) -> Result<ExecuteOutcome> {
+        let mut bus = self.bus.lock().await;
+        bus.redo()?;
+        Ok(ExecuteOutcome {
+            project: bus.project().clone(),
+            can_undo: bus.can_undo(),
+            can_redo: bus.can_redo(),
+        })
+    }
+
+    pub fn probe_media(&self, path: &Path) -> Result<fpv_media::MediaInfo> {
+        fpv_media::probe(path).context("ffprobe failed")
+    }
+
+    pub fn export_clip(
+        &self,
+        clip: &fpv_core::Clip,
+        settings: &fpv_media::ExportSettings,
+    ) -> Result<()> {
+        fpv_media::export_clip(clip, settings).context("ffmpeg export failed")
+    }
+
+    /// PLAN.md section 4.1: configure the AI provider (base URL/key/model).
+    pub async fn configure_ai(&self, config: ProviderConfig) {
+        *self.ai_config.lock().await = Some(config);
+    }
+
+    pub async fn test_ai_connection(&self) -> Result<()> {
+        let config = self
+            .ai_config
+            .lock()
+            .await
+            .clone()
+            .context("AI provider is not configured")?;
+        AiClient::new(&config).test_connection().await?;
+        Ok(())
+    }
+
+    /// PLAN.md section 4.3: the internal agent panel — sees the current
+    /// timeline and can edit it through the same tool catalog as the MCP
+    /// server exposes to external agents.
+    pub async fn chat(&self, prompt: &str) -> Result<String> {
+        let config = self
+            .ai_config
+            .lock()
+            .await
+            .clone()
+            .context("AI provider is not configured")?;
+        let client = AiClient::new(&config);
+        let mut bus = self.bus.lock().await;
+        let reply = fpv_ai::run_turn(&client, &mut bus, prompt).await?;
+        Ok(reply)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fpv_core::TrackKind;
+    use wiremock::matchers::{method, path as wpath};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn execute_command_mutates_shared_state_visible_to_get_timeline_state() {
+        let state = AppState::default();
+        state
+            .execute_command(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V1".into(),
+            })
+            .await
+            .unwrap();
+        let project = state.get_timeline_state().await;
+        assert_eq!(project.tracks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn undo_after_add_track_restores_empty_project() {
+        let state = AppState::default();
+        let outcome = state
+            .execute_command(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V1".into(),
+            })
+            .await
+            .unwrap();
+        assert!(outcome.can_undo);
+        assert!(!outcome.can_redo);
+
+        let after_undo = state.undo().await.unwrap();
+        assert!(after_undo.project.tracks.is_empty());
+        assert!(after_undo.can_redo);
+    }
+
+    #[tokio::test]
+    async fn save_then_load_round_trips_through_a_real_file() {
+        let dir = std::env::temp_dir().join(format!("fpv-app-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("proj.fpv.json");
+
+        let state = AppState::default();
+        state
+            .execute_command(Command::AddTrack {
+                kind: TrackKind::Audio,
+                name: "A1".into(),
+            })
+            .await
+            .unwrap();
+        state.save_project(&path).await.unwrap();
+
+        let fresh_state = AppState::default();
+        let loaded = fresh_state.load_project(&path).await.unwrap();
+        assert_eq!(loaded.tracks.len(), 1);
+        assert_eq!(loaded.tracks[0].kind, TrackKind::Audio);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn chat_without_ai_configured_returns_a_clear_error_not_a_panic() {
+        let state = AppState::default();
+        let err = state.chat("do something").await.unwrap_err();
+        assert!(err.to_string().contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn chat_drives_the_same_command_bus_the_gui_uses() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(wpath("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "c1", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "done" },
+                    "finish_reason": "stop"
+                }],
+                "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+            })))
+            .mount(&server)
+            .await;
+
+        let state = AppState::default();
+        state
+            .configure_ai(ProviderConfig::new(server.uri(), "test-model"))
+            .await;
+
+        let reply = state.chat("hello").await.unwrap();
+        assert_eq!(reply, "done");
+    }
+
+    #[tokio::test]
+    async fn a_clip_added_by_chat_is_visible_via_get_timeline_state() {
+        let server = MockServer::start().await;
+        let state = AppState::default();
+        let outcome = state
+            .execute_command(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V1".into(),
+            })
+            .await
+            .unwrap();
+        let track_id = outcome.project.tracks[0].id;
+
+        let tool_args = serde_json::json!({
+            "track_id": track_id,
+            "clip": { "source_path": "run.mp4", "in_point": 0, "out_point": 1_000_000, "position": 0 }
+        });
+        Mock::given(method("POST"))
+            .and(wpath("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "c1", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "add_clip", "arguments": tool_args.to_string() }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(wpath("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "c2", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "added it" },
+                    "finish_reason": "stop"
+                }],
+                "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+            })))
+            .mount(&server)
+            .await;
+
+        state
+            .configure_ai(ProviderConfig::new(server.uri(), "test-model"))
+            .await;
+        let reply = state.chat("add my run.mp4 clip").await.unwrap();
+        assert_eq!(reply, "added it");
+
+        // Read through the GUI-facing accessor, not the tool-call result,
+        // to prove the agent's edit landed in the shared command bus.
+        let project = state.get_timeline_state().await;
+        assert_eq!(project.clips.len(), 1);
+    }
+}

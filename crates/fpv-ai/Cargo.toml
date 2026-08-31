@@ -1,0 +1,16 @@
+[package]
+name = "fpv-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+async-openai = { version = "0.41", default-features = false, features = ["chat-completion"] }
+fpv-core = { workspace = true }
+
+[dev-dependencies]
+wiremock = "0.6"
