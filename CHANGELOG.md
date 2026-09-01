@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/mroxso/FPVEditor/compare/v0.4.0...v0.4.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **app:** ad-hoc sign macOS bundle to avoid Gatekeeper "damaged" error ([b8dae56](https://github.com/mroxso/FPVEditor/commit/b8dae56d0ecc66553950ca34cb379525a66973ab))
+
 ## [0.4.0](https://github.com/mroxso/FPVEditor/compare/v0.3.0...v0.4.0) (2026-09-01)
 
 
