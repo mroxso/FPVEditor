@@ -390,7 +390,7 @@ function App() {
         return;
       }
       if (event.key.toLowerCase() === "v") setEditTool("select");
-      if (event.key.toLowerCase() === "c") setEditTool("razor");
+      if (event.key.toLowerCase() === "c") setEditTool((current) => current === "razor" ? "select" : "razor");
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
         void removeSelected();
@@ -1230,16 +1230,17 @@ function Timeline({
     event.currentTarget.addEventListener("pointerup", finish, { once: true });
   };
   return (
-    <section className="relative overflow-hidden border-t bg-card" style={{ height }}>
+    <section className={`timeline-editor relative overflow-hidden border-t bg-card ${tool === "razor" ? "is-razor" : "is-select"}`} style={{ height }}>
       <button aria-label="Resize timeline" className="timeline-resize-handle" onPointerDown={resize}>
         <GripHorizontal />
       </button>
-      <div className="grid h-10 grid-cols-[148px_1fr_188px] border-b">
+      <div className="grid h-12 grid-cols-[148px_minmax(180px,1fr)_420px] border-b">
         <div className="flex items-center gap-2 border-r px-4">
           <span className="text-xs font-medium">Timeline</span>
           <Badge variant="outline" className="font-mono text-[9px]">
             MAGNETIC
           </Badge>
+          {tool === "razor" && <span className="font-mono text-[9px] uppercase tracking-wide text-foreground">Razor active</span>}
         </div>
         <div className="timeline-ruler relative" onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}>
           {[0, 5, 10, 15, 20, 25, 30].map((second) => (
@@ -1250,9 +1251,27 @@ function Timeline({
             >{`00:${String(second).padStart(2, "0")}`}</span>
           ))}
         </div>
-        <div className="flex items-center justify-end gap-1 px-2">
-          <IconButton label="Selection tool (V)" aria-pressed={tool === "select"} className={tool === "select" ? "bg-accent" : ""} onClick={() => setTool("select")}><MousePointer2 /></IconButton>
-          <IconButton label="Razor tool (C)" aria-pressed={tool === "razor"} className={tool === "razor" ? "bg-accent" : ""} onClick={() => setTool("razor")}><Scissors /></IconButton>
+        <div className="timeline-tools flex items-center justify-end gap-1 px-2">
+          <Button
+            aria-pressed={tool === "select"}
+            className={`timeline-tool ${tool === "select" ? "is-active" : ""}`}
+            size="xs"
+            variant="ghost"
+            onClick={() => setTool("select")}
+          >
+            <MousePointer2 data-icon="inline-start" />
+            Select <kbd>V</kbd>
+          </Button>
+          <Button
+            aria-pressed={tool === "razor"}
+            className={`timeline-tool ${tool === "razor" ? "is-active" : ""}`}
+            size="xs"
+            variant="ghost"
+            onClick={() => setTool(tool === "razor" ? "select" : "razor")}
+          >
+            <Scissors data-icon="inline-start" />
+            Razor <kbd>C</kbd>
+          </Button>
           <IconButton label="Split selected clip at playhead (Enter)" disabled={!selected} onClick={() => {
             const clip = selected ? project.clips[selected] : undefined;
             if (clip && playhead > clip.position && playhead < clip.position + clip.out_point - clip.in_point) void onSplit(clip.id, playhead);
@@ -1277,7 +1296,7 @@ function Timeline({
           </Button>
         </div>
       </div>
-      <div className="relative overflow-auto" style={{ height: "calc(100% - 40px)" }}>
+      <div className="relative overflow-auto" style={{ height: "calc(100% - 48px)" }}>
         {project.tracks.length === 0 && (
           <div className="grid h-full place-items-center text-center">
             <div>
@@ -1343,7 +1362,7 @@ function Timeline({
         ))}
       </div>
       <div
-        className="absolute bottom-0 top-10 w-px bg-foreground"
+        className="absolute bottom-0 top-12 w-px bg-foreground"
         style={{
           left: `calc(148px + ${(playhead / duration) * 100}% * (100% - 148px) / 100)`,
         }}
