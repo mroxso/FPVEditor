@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/fpv-core",
+    "crates/fpv-media",
+    "crates/fpv-stabilize",
+    "crates/fpv-gpu",
+    "crates/fpv-ai",
+    "crates/fpv-mcp",
+    "crates/fpv-cli",
+    "crates/fpv-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+clap = { version = "4", features = ["derive"] }
+
+fpv-core = { path = "crates/fpv-core" }
+fpv-media = { path = "crates/fpv-media" }
+fpv-stabilize = { path = "crates/fpv-stabilize" }
+fpv-gpu = { path = "crates/fpv-gpu" }
+fpv-ai = { path = "crates/fpv-ai" }
+fpv-mcp = { path = "crates/fpv-mcp" }
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+lto = true

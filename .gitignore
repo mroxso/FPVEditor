@@ -1,0 +1,7 @@
+/target/
+**/target/
+*.fpv.json
+.DS_Store
+frontend/node_modules/
+frontend/dist/
+crates/fpv-app/gen/

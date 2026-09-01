@@ -1,0 +1,15 @@
+{
+  "release-type": "rust",
+  "packages": {
+    ".": {
+      "package-name": "fpv-editor",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "crates/fpv-app/tauri.conf.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}
