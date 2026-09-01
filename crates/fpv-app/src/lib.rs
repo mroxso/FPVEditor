@@ -21,12 +21,13 @@ use anyhow::{Context, Result};
 use fpv_ai::{AiClient, ProviderConfig};
 use fpv_core::{Command, CommandBus, NewClip, Project, Timecode, TrackKind};
 use serde::Serialize;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 pub struct AppState {
     bus: Arc<Mutex<CommandBus>>,
     ai_config: Arc<Mutex<Option<ProviderConfig>>>,
     project_path: Arc<Mutex<Option<PathBuf>>>,
+    preview_render_limit: Arc<Semaphore>,
 }
 
 impl Default for AppState {
@@ -59,6 +60,7 @@ impl AppState {
             bus: Arc::new(Mutex::new(CommandBus::new(project))),
             ai_config: Arc::new(Mutex::new(None)),
             project_path: Arc::new(Mutex::new(None)),
+            preview_render_limit: Arc::new(Semaphore::new(1)),
         }
     }
 
@@ -159,7 +161,10 @@ impl AppState {
             }
         });
         if readable.is_empty() {
-            let detail = probe_errors.first().map(String::as_str).unwrap_or("no usable video stream found");
+            let detail = probe_errors
+                .first()
+                .map(String::as_str)
+                .unwrap_or("no usable video stream found");
             anyhow::bail!("no readable video files could be imported ({detail})")
         }
 
@@ -226,23 +231,39 @@ impl AppState {
                 .as_nanos()
         );
         let output = root.join(format!("{token}.mp4"));
-        if let Some(id) = clip_id {
-            let clip = project.clip(id).context("selected clip no longer exists")?;
-            fpv_media::export_clip(
-                clip,
-                &fpv_media::ExportSettings {
-                    output_path: output.clone(),
-                    width: project.width,
-                    height: project.height,
-                    fps: project.fps,
-                    crf: Some(28),
-                },
-            )
-            .context("could not render clip preview")?;
-        } else {
-            fpv_media::export_timeline_preview(&project, &output)
-                .context("could not render timeline preview")?;
-        }
+        // A rapid sequence of edits must not launch an ffmpeg process for
+        // every intermediate state.  One bounded worker keeps the desktop
+        // responsive and prevents runaway CPU use.
+        let _permit = self
+            .preview_render_limit
+            .clone()
+            .acquire_owned()
+            .await
+            .context("preview renderer is unavailable")?;
+        let rendered_path = output.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            if let Some(id) = clip_id {
+                let clip = project.clip(id).context("selected clip no longer exists")?;
+                let (width, height) = fpv_media::preview_dimensions(project.width, project.height);
+                fpv_media::export_clip_preview(
+                    clip,
+                    &fpv_media::ExportSettings {
+                        output_path: rendered_path,
+                        width,
+                        height,
+                        fps: project.fps,
+                        crf: Some(28),
+                    },
+                )
+                .context("could not render clip preview")?;
+            } else {
+                fpv_media::export_timeline_preview(&project, &rendered_path)
+                    .context("could not render timeline preview")?;
+            }
+            Ok(())
+        })
+        .await
+        .context("preview renderer task stopped unexpectedly")??;
         Ok(output)
     }
 

@@ -552,14 +552,16 @@ function Preview({
   setPlaying: (value: boolean) => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
-  const [mode, setMode] = useState<"clip" | "timeline">("timeline");
+  const [mode, setMode] = useState<"clip" | "timeline">("clip");
   const [source, setSource] = useState<string>();
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string>();
   const selectedId = selectedClip?.id;
   useEffect(() => {
     let active = true;
-    setSource(undefined);
+    // A selected clip is immediately playable while its effect-aware preview
+    // is prepared. This avoids a blank monitor during FFmpeg rendering.
+    setSource(mode === "clip" && selectedClip ? mediaSource(selectedClip.source_path) : undefined);
     setError(undefined);
     if (mode === "clip" && !selectedId) return;
     setRendering(true);
@@ -573,10 +575,6 @@ function Preview({
         if (!active) return;
         // Development in a browser has no Tauri renderer; direct source
         // playback still makes the single-clip monitor useful there.
-        const fallback = mode === "clip" && selectedClip
-          ? mediaSource(selectedClip.source_path)
-          : undefined;
-        setSource(fallback);
         setError(`Preview render failed: ${String(reason)}`);
       })
       .finally(() => {
@@ -637,7 +635,7 @@ function Preview({
           )}
           <div className="absolute bottom-3 left-4 right-4 flex justify-between font-mono text-[10px] text-muted-foreground">
             <span>{timecode(playhead)}</span>
-            <span>{rendering ? "Rendering preview…" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
+            <span>{rendering ? "Preparing preview…" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
           </div>
         </div>
       </div>
@@ -675,7 +673,7 @@ function Preview({
           variant="outline"
           onClick={() => setMode((current) => current === "timeline" ? "clip" : "timeline")}
         >
-          {mode === "timeline" ? "Timeline" : "Clip"}
+          {mode === "timeline" ? "Show clip" : "Show timeline"}
         </Button>
       </div>
       {error && <p className="px-3 pb-1 text-center text-[10px] text-destructive">{error}</p>}

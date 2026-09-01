@@ -20,6 +20,18 @@ pub struct ExportSettings {
     pub crf: Option<u8>,
 }
 
+/// Monitor renders should become interactive quickly and must not compete with
+/// final export for every available CPU core.  Keep the source aspect ratio,
+/// but cap the long edge at a practical editing-preview size.
+pub fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
+    const MAX_WIDTH: u32 = 960;
+    if width <= MAX_WIDTH {
+        return (width, height);
+    }
+    let scaled_height = ((height as f64 * MAX_WIDTH as f64 / width as f64).round() as u32 / 2) * 2;
+    (MAX_WIDTH, scaled_height.max(2))
+}
+
 /// Build the `ffmpeg` argv that renders `clip` (trim, stabilization crop,
 /// LUT, and a constant-rate speed change) to `settings.output_path`.
 ///
@@ -88,6 +100,25 @@ pub fn export_clip(clip: &Clip, settings: &ExportSettings) -> MediaResult<()> {
     process::run("ffmpeg", &args)
 }
 
+/// Fast, resource-bounded rendition for the editor monitor.  Final exports
+/// deliberately keep their normal encoder settings.
+pub fn export_clip_preview(clip: &Clip, settings: &ExportSettings) -> MediaResult<()> {
+    let mut args = export_clip_args(clip, settings);
+    let output = args
+        .pop()
+        .expect("export arguments always include an output path");
+    args.extend([
+        "-preset".to_string(),
+        "ultrafast".to_string(),
+        "-threads".to_string(),
+        "2".to_string(),
+        "-movflags".to_string(),
+        "+faststart".to_string(),
+        output,
+    ]);
+    process::run("ffmpeg", &args)
+}
+
 /// Render the visible video timeline into an H.264 preview file.  Each clip
 /// is first passed through the same renderer used by export, then placed at
 /// its timeline position.  This deliberately makes the editor monitor match
@@ -98,6 +129,7 @@ pub fn export_clip(clip: &Clip, settings: &ExportSettings) -> MediaResult<()> {
 /// preview is video-only for now; audio mixing belongs in the final export
 /// pipeline, where track gain and transitions can be represented explicitly.
 pub fn export_timeline_preview(project: &Project, output_path: &Path) -> MediaResult<()> {
+    let (width, height) = preview_dimensions(project.width, project.height);
     let clips: Vec<&Clip> = project
         .tracks
         .iter()
@@ -122,15 +154,15 @@ pub fn export_timeline_preview(project: &Project, output_path: &Path) -> MediaRe
         .unwrap_or("preview");
     let settings_for = |path: PathBuf| ExportSettings {
         output_path: path,
-        width: project.width,
-        height: project.height,
+        width,
+        height,
         fps: project.fps,
         crf: Some(28),
     };
     let mut rendered = Vec::with_capacity(clips.len());
     for (index, clip) in clips.iter().enumerate() {
         let path = cache_dir.join(format!("{stem}-clip-{index}.mp4"));
-        export_clip(clip, &settings_for(path.clone()))?;
+        export_clip_preview(clip, &settings_for(path.clone()))?;
         rendered.push(path);
     }
 
@@ -142,7 +174,7 @@ pub fn export_timeline_preview(project: &Project, output_path: &Path) -> MediaRe
         "-i".into(),
         format!(
             "color=c=black:s={}x{}:r={}:d={duration}",
-            project.width, project.height, project.fps
+            width, height, project.fps
         ),
     ];
     for path in &rendered {
@@ -175,6 +207,8 @@ pub fn export_timeline_preview(project: &Project, output_path: &Path) -> MediaRe
         "libx264".into(),
         "-preset".into(),
         "ultrafast".into(),
+        "-threads".into(),
+        "2".into(),
         "-crf".into(),
         "28".into(),
         "-movflags".into(),
@@ -393,7 +427,7 @@ mod tests {
         let output = dir.join("timeline.mp4");
         export_timeline_preview(bus.project(), &output).unwrap();
         let info = crate::probe::probe(&output).unwrap();
-        assert_eq!((info.width, info.height), (1920, 1080));
+        assert_eq!((info.width, info.height), (960, 540));
         assert!(info.duration_us >= 1_900_000);
         std::fs::remove_dir_all(&dir).ok();
     }
