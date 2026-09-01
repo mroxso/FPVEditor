@@ -126,6 +126,7 @@ type UpdateCheckResult = {
 };
 type WorkflowPhase = "import" | "stabilize" | "cut" | "grade" | "export";
 type EditTool = "select" | "razor";
+type PreviewMode = "clip" | "timeline";
 const workflowPhases: {
   id: WorkflowPhase;
   label: string;
@@ -230,6 +231,8 @@ function App() {
   const [selected, setSelected] = useState<string>();
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("clip");
+  const [previewRequestId, setPreviewRequestId] = useState(0);
   const [editTool, setEditTool] = useState<EditTool>("select");
   const [activePhase, setActivePhase] = useState<WorkflowPhase>("import");
   const [undoable, setUndoable] = useState(false);
@@ -294,6 +297,9 @@ function App() {
     void refresh();
     void getVersion().then(setAppVersion).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (activePhase === "cut") setPreviewMode("timeline");
+  }, [activePhase]);
   useEffect(() => { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); }, [preferences]);
   const checkForUpdates = useCallback(async (silent = false) => {
     setCheckingUpdate(true);
@@ -638,6 +644,9 @@ function App() {
           <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px] bg-muted/30">
             {activePhase === "export" ? <ExportWorkspace project={project} selectedClip={selectedClip} saveProject={saveProject} /> : <Preview
               selectedClip={selectedClip}
+              mode={previewMode}
+              setMode={setPreviewMode}
+              requestId={previewRequestId}
               playhead={playhead}
               duration={duration}
               playing={playing}
@@ -669,6 +678,10 @@ function App() {
           duration={duration}
           playhead={playhead}
           setPlayhead={setPlayhead}
+          onPreviewTimeline={() => {
+            setPreviewMode("timeline");
+            setPreviewRequestId((current) => current + 1);
+          }}
           tool={editTool}
           setTool={setEditTool}
           onSelect={setSelected}
@@ -781,6 +794,9 @@ function ExportWorkspace({ project, selectedClip, saveProject }: { project: Proj
 }
 function Preview({
   selectedClip,
+  mode,
+  setMode,
+  requestId,
   playhead,
   duration,
   playing,
@@ -788,6 +804,9 @@ function Preview({
   setPlaying,
 }: {
   selectedClip?: Clip;
+  mode: PreviewMode;
+  setMode: (mode: PreviewMode) => void;
+  requestId: number;
   playhead: number;
   duration: number;
   playing: boolean;
@@ -795,7 +814,6 @@ function Preview({
   setPlaying: (value: boolean) => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
-  const [mode, setMode] = useState<"clip" | "timeline">("clip");
   const [source, setSource] = useState<string>();
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string>();
@@ -824,17 +842,28 @@ function Preview({
         if (active) setRendering(false);
       });
     return () => { active = false; };
-  }, [mode, selectedId, selectedClip]);
+  }, [mode, requestId, selectedId, selectedClip]);
   useEffect(() => {
     const element = video.current;
     if (!element) return;
     if (playing) void element.play().catch(() => setPlaying(false));
     else element.pause();
   }, [playing, source, setPlaying]);
+  useEffect(() => {
+    const element = video.current;
+    if (!element || !Number.isFinite(element.duration)) return;
+    const target = Math.min(element.duration, playhead / 1_000_000);
+    // Native playback updates the shared playhead too. Only seek when the
+    // difference is meaningful, otherwise normal playback would stutter.
+    if (Math.abs(element.currentTime - target) > 0.04) element.currentTime = target;
+  }, [playhead, source]);
   const seek = (next: number) => {
     const value = Math.max(0, Math.min(duration, next));
     setPlayhead(value);
     if (video.current) video.current.currentTime = value / 1_000_000;
+  };
+  const seekToPlayhead = (element: HTMLVideoElement) => {
+    element.currentTime = Math.min(element.duration || 0, playhead / 1_000_000);
   };
   return (
     <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px]">
@@ -851,6 +880,7 @@ function Preview({
               controls
               preload="metadata"
               src={source}
+              onLoadedMetadata={(event) => seekToPlayhead(event.currentTarget)}
               onTimeUpdate={(event) => setPlayhead(event.currentTarget.currentTime * 1_000_000)}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
@@ -876,9 +906,26 @@ function Preview({
               </div>
             </div>
           )}
+          {rendering && (
+            <div
+              className="absolute inset-x-5 top-5 z-10 flex items-center gap-3 rounded-md border border-amber-300/30 bg-black/80 px-4 py-3 shadow-xl backdrop-blur-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <RefreshCw className="size-4 shrink-0 animate-spin text-amber-300" />
+              <div className="min-w-0">
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-[.14em] text-amber-200">
+                  {mode === "timeline" ? "Rendering timeline preview" : "Rendering clip preview"}
+                </p>
+                <p className="mt-0.5 text-xs text-white/65">
+                  Preparing edits and effects. You can continue editing while this runs.
+                </p>
+              </div>
+            </div>
+          )}
           <div className="absolute bottom-3 left-4 right-4 flex justify-between font-mono text-[10px] text-muted-foreground">
             <span>{timecode(playhead)}</span>
-            <span>{rendering ? "Preparing preview…" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
+            <span>{rendering ? "Rendering in background" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
           </div>
         </div>
       </div>
@@ -914,7 +961,7 @@ function Preview({
         <Button
           size="xs"
           variant="outline"
-          onClick={() => setMode((current) => current === "timeline" ? "clip" : "timeline")}
+          onClick={() => setMode(mode === "timeline" ? "clip" : "timeline")}
         >
           {mode === "timeline" ? "Show clip" : "Show timeline"}
         </Button>
@@ -1146,6 +1193,7 @@ function Timeline({
   duration,
   playhead,
   setPlayhead,
+  onPreviewTimeline,
   tool,
   setTool,
   onSelect,
@@ -1163,6 +1211,7 @@ function Timeline({
   duration: number;
   playhead: number;
   setPlayhead: (value: number) => void;
+  onPreviewTimeline: () => void;
   tool: EditTool;
   setTool: (tool: EditTool) => void;
   onSelect: (id: string) => void;
@@ -1175,6 +1224,7 @@ function Timeline({
   height: number;
   setHeight: (height: number) => void;
 }) {
+  const [draggingClip, setDraggingClip] = useState<{ id: string; position: number; trackId: string }>();
   const toTimecode = (value: number) => Math.round(Math.max(0, value));
   const timeAtPointer = (event: { clientX: number }, lane: HTMLElement) =>
     toTimecode(Math.min(duration, ((event.clientX - lane.getBoundingClientRect().left) / lane.getBoundingClientRect().width) * duration));
@@ -1197,22 +1247,53 @@ function Timeline({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
   };
+  const movePlayhead = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const rail = handle.parentElement;
+    if (!rail) return;
+    const update = (pointerEvent: { clientX: number }) => setPlayhead(timeAtPointer(pointerEvent, rail));
+    update(event);
+    handle.setPointerCapture(event.pointerId);
+    const move = (pointerEvent: PointerEvent) => update(pointerEvent);
+    const stop = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", stop);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop, { once: true });
+  };
+  const clipMoveAt = (pointerEvent: { clientX: number; clientY: number }, clip: Clip, originX: number) => {
+    const target = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)?.closest<HTMLElement>("[data-track-id]");
+    const lane = target?.querySelector<HTMLElement>("[data-timeline-lane]");
+    const trackId = target?.dataset.trackId;
+    if (!lane || !trackId) return undefined;
+    const offset = ((pointerEvent.clientX - originX) / lane.getBoundingClientRect().width) * duration;
+    return { position: toTimecode(Math.max(0, clip.position + offset)), trackId };
+  };
   const moveClip = (event: React.PointerEvent<HTMLButtonElement>, clip: Clip) => {
     if (tool !== "select" || event.button !== 0) return;
+    const handle = event.currentTarget;
     const originX = event.clientX;
-    const sourceTrack = event.currentTarget.closest<HTMLElement>("[data-track-id]");
+    const sourceTrack = handle.closest<HTMLElement>("[data-track-id]");
     if (!sourceTrack) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const finish = (upEvent: PointerEvent) => {
-      const target = document.elementFromPoint(upEvent.clientX, upEvent.clientY)?.closest<HTMLElement>("[data-track-id]");
-      if (!target || Math.abs(upEvent.clientX - originX) < 3) return;
-      const lane = target.querySelector<HTMLElement>("[data-timeline-lane]");
-      const trackId = target.dataset.trackId;
-      if (!lane || !trackId) return;
-      const offset = ((upEvent.clientX - originX) / lane.getBoundingClientRect().width) * duration;
-      void onMove(clip.id, trackId, toTimecode(clip.position + offset));
+    handle.setPointerCapture(event.pointerId);
+    let moved = false;
+    const move = (moveEvent: PointerEvent) => {
+      const next = clipMoveAt(moveEvent, clip, originX);
+      if (!next) return;
+      moved ||= Math.abs(moveEvent.clientX - originX) >= 3;
+      if (moved) setDraggingClip({ id: clip.id, ...next });
     };
-    event.currentTarget.addEventListener("pointerup", finish, { once: true });
+    const finish = (upEvent: PointerEvent) => {
+      const next = clipMoveAt(upEvent, clip, originX);
+      handle.removeEventListener("pointermove", move);
+      setDraggingClip(undefined);
+      if (moved && next) void onMove(clip.id, next.trackId, next.position);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish, { once: true });
     // A click still selects; the pointer-up handler above only mutates after a drag.
     onSelect(clip.id);
   };
@@ -1277,6 +1358,10 @@ function Timeline({
           }}><Scissors /></IconButton>
           <IconButton label="Remove selected clip (Delete)" disabled={!selected} onClick={() => void onRemove()}><Trash2 /></IconButton>
           <Separator orientation="vertical" className="mx-1 h-4" />
+          <Button variant="ghost" size="xs" onClick={onPreviewTimeline}>
+            <Play data-icon="inline-start" />
+            Preview
+          </Button>
           <Button
             variant="ghost"
             size="xs"
@@ -1333,10 +1418,15 @@ function Timeline({
             <div className="timeline-lane relative" data-timeline-lane onPointerDown={(event) => {
               if (event.target === event.currentTarget) setPlayhead(timeAtPointer(event, event.currentTarget));
             }}>
-              {track.clip_order.map((id) => {
+              {(draggingClip?.trackId === track.id && !track.clip_order.includes(draggingClip.id)
+                ? [...track.clip_order, draggingClip.id]
+                : track.clip_order
+              ).map((id) => {
                 const clip = project.clips[id];
                 if (!clip) return null;
-                const left = (clip.position / duration) * 100;
+                if (draggingClip?.id === id && draggingClip.trackId !== track.id) return null;
+                const displayPosition = draggingClip?.id === id ? draggingClip.position : clip.position;
+                const left = (displayPosition / duration) * 100;
                 const width = Math.max(
                   8,
                   ((clip.out_point - clip.in_point) / duration) * 100,
@@ -1353,7 +1443,7 @@ function Timeline({
                       }
                       moveClip(event, clip);
                     }}
-                    className={`timeline-clip ${selected === id ? "is-selected" : ""} ${tool === "razor" ? "is-razor" : ""}`}
+                    className={`timeline-clip ${selected === id ? "is-selected" : ""} ${draggingClip?.id === id ? "is-moving" : ""} ${tool === "razor" ? "is-razor" : ""}`}
                     style={{ left: `${left}%`, width: `${width}%` }}
                   >
                     {selected === id && tool === "select" && <>
@@ -1372,12 +1462,18 @@ function Timeline({
           </div>
         ))}
       </div>
-      <div
-        className="pointer-events-none absolute bottom-0 top-[88px] z-10 w-px bg-foreground"
-        style={{
-          left: `calc(148px + ${(playhead / duration) * 100}% * (100% - 148px) / 100)`,
-        }}
-      />
+      <div className="pointer-events-none absolute bottom-0 left-[148px] right-0 top-[52px] z-10">
+        <div
+          className="timeline-playhead-line absolute bottom-0 top-0"
+          style={{ left: `${(playhead / duration) * 100}%` }}
+        />
+        <button
+          aria-label="Drag playhead"
+          className="timeline-playhead pointer-events-auto absolute top-0"
+          onPointerDown={movePlayhead}
+          style={{ left: `${(playhead / duration) * 100}%` }}
+        />
+      </div>
     </section>
   );
 }
