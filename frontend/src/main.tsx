@@ -613,7 +613,7 @@ function App() {
           }}
         >
           {showMedia && <aside className="border-r bg-card">
-            <PanelTitle icon={<Layers2 />} title="Media" open={mediaOpen} onToggle={() => setPreference("mediaOpen", !mediaOpen)} />
+            <PanelTitle icon={<Layers2 />} title="Media" side="left" open={mediaOpen} onToggle={() => setPreference("mediaOpen", !mediaOpen)} />
             {mediaOpen && <div className="p-3">
               {Object.values(project.clips).length === 0 ? (
                 <EmptyMedia importMedia={importMedia} importFolder={importFolder} />
@@ -655,7 +655,7 @@ function App() {
             />}
           </section>
           {showInspector && <aside className="border-l bg-card">
-            <PanelTitle icon={<Command />} title="Inspector" open={inspectorOpen} onToggle={() => setPreference("inspectorOpen", !inspectorOpen)} />
+            <PanelTitle icon={<Command />} title="Inspector" side="right" open={inspectorOpen} onToggle={() => setPreference("inspectorOpen", !inspectorOpen)} />
             {inspectorOpen && (selectedClip ? (
               <ClipInspector clip={selectedClip} command={command} phase={activePhase} />
             ) : (
@@ -728,21 +728,27 @@ function App() {
 function PanelTitle({
   icon,
   title,
+  side,
   open,
   onToggle,
 }: {
   icon: React.ReactNode;
   title: string;
+  side: "left" | "right";
   open?: boolean;
   onToggle?: () => void;
 }) {
+  const isOpen = open !== false;
+  const ToggleIcon = side === "left"
+    ? (isOpen ? ChevronsLeft : ChevronsRight)
+    : (isOpen ? ChevronsRight : ChevronsLeft);
   return (
-    <div className="flex h-11 items-center gap-2 border-b px-2 text-xs font-medium">
-      <span className="text-muted-foreground">{icon}</span>
-      {open !== false && <span className="flex-1">{title}</span>}
+    <div className={`flex h-11 items-center border-b text-xs font-medium ${isOpen ? "gap-2 px-2" : "justify-center px-0"}`}>
+      {isOpen && <span className="text-muted-foreground">{icon}</span>}
+      {isOpen && <span className="flex-1">{title}</span>}
       {onToggle && (
-        <IconButton label={`${open ? "Collapse" : "Expand"} ${title}`} onClick={onToggle}>
-          {open ? <ChevronsLeft /> : <ChevronsRight />}
+        <IconButton label={`${isOpen ? "Collapse" : "Expand"} ${title}`} onClick={onToggle}>
+          <ToggleIcon />
         </IconButton>
       )}
     </div>
