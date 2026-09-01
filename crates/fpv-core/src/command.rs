@@ -42,6 +42,14 @@ pub enum Command {
         new_in: Timecode,
         new_out: Timecode,
     },
+    /// Trim the beginning of a clip while keeping its visible left edge in
+    /// sync with the new timeline position. This is deliberately a single
+    /// command so one trim gesture is one undoable editor action.
+    TrimClipStart {
+        clip_id: ClipId,
+        new_in: Timecode,
+        new_position: Timecode,
+    },
     SplitClip {
         clip_id: ClipId,
         /// Absolute timeline position at which to split.
@@ -102,6 +110,7 @@ impl Command {
             Command::AddClip { .. } => "Add clip".to_string(),
             Command::RemoveClip { clip_id } => format!("Remove clip {clip_id}"),
             Command::TrimClip { clip_id, .. } => format!("Trim clip {clip_id}"),
+            Command::TrimClipStart { clip_id, .. } => format!("Trim clip start {clip_id}"),
             Command::SplitClip { clip_id, .. } => format!("Split clip {clip_id}"),
             Command::ReorderClip { clip_id, .. } => format!("Reorder clip {clip_id}"),
             Command::MoveClip { clip_id, .. } => format!("Move clip {clip_id}"),
@@ -154,7 +163,9 @@ impl Command {
                     &project.clips,
                     new_clip.position,
                 );
-                project.tracks[track_idx].clip_order.insert(idx, new_clip.id);
+                project.tracks[track_idx]
+                    .clip_order
+                    .insert(idx, new_clip.id);
                 project.clips.insert(new_clip.id, new_clip);
                 Ok(())
             }
@@ -186,6 +197,26 @@ impl Command {
                 }
                 clip.in_point = *new_in;
                 clip.out_point = *new_out;
+                Ok(())
+            }
+            Command::TrimClipStart {
+                clip_id,
+                new_in,
+                new_position,
+            } => {
+                let clip = project
+                    .clip_mut(*clip_id)
+                    .ok_or(CoreError::ClipNotFound(*clip_id))?;
+                if *new_in >= clip.out_point {
+                    return Err(CoreError::InvalidTrim {
+                        clip: *clip_id,
+                        in_point: new_in.0,
+                        out_point: clip.out_point.0,
+                        source_duration: clip.source_duration().0,
+                    });
+                }
+                clip.in_point = *new_in;
+                clip.position = *new_position;
                 Ok(())
             }
             Command::SplitClip { clip_id, at } => {

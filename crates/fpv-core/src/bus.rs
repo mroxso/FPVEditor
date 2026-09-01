@@ -67,7 +67,7 @@ impl CommandBus {
 mod tests {
     use super::*;
     use crate::command::NewClip;
-    use crate::model::{TrackKind, Timecode};
+    use crate::model::{Timecode, TrackKind};
 
     fn bus_with_video_track() -> (CommandBus, crate::model::TrackId) {
         let mut bus = CommandBus::new(Project::new("test"));
@@ -191,6 +191,37 @@ mod tests {
         assert_eq!(bus.project().clips.len(), 1);
         let clip = bus.project().clip(clip_id).unwrap();
         assert_eq!(clip.out_point, Timecode::from_seconds(10.0));
+    }
+
+    #[test]
+    fn trim_clip_start_moves_its_timeline_edge_and_is_undoable() {
+        let (mut bus, track_id) = bus_with_video_track();
+        bus.execute(Command::AddClip {
+            track_id,
+            clip: NewClip {
+                source_path: "a.mp4".into(),
+                in_point: Timecode::ZERO,
+                out_point: Timecode::from_seconds(10.0),
+                position: Timecode::from_seconds(2.0),
+            },
+        })
+        .unwrap();
+        let clip_id = bus.project().tracks[0].clip_order[0];
+
+        bus.execute(Command::TrimClipStart {
+            clip_id,
+            new_in: Timecode::from_seconds(3.0),
+            new_position: Timecode::from_seconds(5.0),
+        })
+        .unwrap();
+        let clip = bus.project().clip(clip_id).unwrap();
+        assert_eq!(clip.in_point, Timecode::from_seconds(3.0));
+        assert_eq!(clip.position, Timecode::from_seconds(5.0));
+
+        bus.undo().unwrap();
+        let clip = bus.project().clip(clip_id).unwrap();
+        assert_eq!(clip.in_point, Timecode::ZERO);
+        assert_eq!(clip.position, Timecode::from_seconds(2.0));
     }
 
     #[test]
