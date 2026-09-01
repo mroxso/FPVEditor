@@ -27,6 +27,7 @@ import {
   Scissors,
   Send,
   Settings,
+  MousePointer2,
   SlidersHorizontal,
   Sparkles,
   Trash2,
@@ -124,6 +125,7 @@ type UpdateCheckResult = {
   asset_name: string | null;
 };
 type WorkflowPhase = "import" | "stabilize" | "cut" | "grade" | "export";
+type EditTool = "select" | "razor";
 const workflowPhases: {
   id: WorkflowPhase;
   label: string;
@@ -228,6 +230,7 @@ function App() {
   const [selected, setSelected] = useState<string>();
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [editTool, setEditTool] = useState<EditTool>("select");
   const [activePhase, setActivePhase] = useState<WorkflowPhase>("import");
   const [undoable, setUndoable] = useState(false);
   const [redoable, setRedoable] = useState(false);
@@ -346,6 +349,64 @@ function App() {
       kind,
       name: `${kind === "Video" ? "V" : "A"}${project.tracks.filter((track) => track.kind === kind).length + 1}`,
     });
+  const splitSelected = useCallback(async () => {
+    const clip = selected ? project.clips[selected] : undefined;
+    if (!clip) {
+      setNotice("Select a clip to split");
+      return;
+    }
+    const clipEnd = clip.position + clip.out_point - clip.in_point;
+    if (playhead <= clip.position || playhead >= clipEnd) {
+      setNotice("Move the playhead inside the selected clip to split it");
+      return;
+    }
+    const outcome = await command({ command: "split_clip", clip_id: clip.id, at: playhead });
+    if (outcome) setNotice("Clip split at playhead");
+  }, [playhead, project.clips, selected]);
+  const removeSelected = useCallback(async () => {
+    if (!selected) {
+      setNotice("Select a clip to remove");
+      return;
+    }
+    const outcome = await command({ command: "remove_clip", clip_id: selected });
+    if (outcome) {
+      setSelected(undefined);
+      setNotice("Clip removed");
+    }
+  }, [selected]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable='true']")) return;
+      const modifier = event.metaKey || event.ctrlKey;
+      if (modifier && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        void invoke<Outcome>(event.shiftKey ? "redo" : "undo").then(apply);
+        return;
+      }
+      if (modifier && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        void invoke<Outcome>("redo").then(apply);
+        return;
+      }
+      if (event.key.toLowerCase() === "v") setEditTool("select");
+      if (event.key.toLowerCase() === "c") setEditTool("razor");
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        void removeSelected();
+      }
+      if (event.key === " ") {
+        event.preventDefault();
+        setPlaying((current) => !current);
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void splitSelected();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [removeSelected, splitSelected]);
   const importPaths = useCallback(async (paths: string[]) => {
     if (paths.length === 0) return;
     try {
@@ -607,7 +668,15 @@ function App() {
           selected={selected}
           duration={duration}
           playhead={playhead}
+          setPlayhead={setPlayhead}
+          tool={editTool}
+          setTool={setEditTool}
           onSelect={setSelected}
+          onSplit={(clipId, at) => command({ command: "split_clip", clip_id: clipId, at })}
+          onRemove={removeSelected}
+          onMove={(clipId, trackId, position) => command({ command: "move_clip", clip_id: clipId, new_track_id: trackId, new_position: position })}
+          onTrimEnd={(clip, newOut) => command({ command: "trim_clip", clip_id: clip.id, new_in: clip.in_point, new_out: newOut })}
+          onTrimStart={(clip, newIn, newPosition) => command({ command: "trim_clip_start", clip_id: clip.id, new_in: newIn, new_position: newPosition })}
           onAddTrack={addTrack}
           height={timelineHeight}
           setHeight={(height) => setPreference("timelineHeight", height)}
@@ -1076,7 +1145,15 @@ function Timeline({
   selected,
   duration,
   playhead,
+  setPlayhead,
+  tool,
+  setTool,
   onSelect,
+  onSplit,
+  onRemove,
+  onMove,
+  onTrimStart,
+  onTrimEnd,
   onAddTrack,
   height,
   setHeight,
@@ -1085,11 +1162,21 @@ function Timeline({
   selected?: string;
   duration: number;
   playhead: number;
+  setPlayhead: (value: number) => void;
+  tool: EditTool;
+  setTool: (tool: EditTool) => void;
   onSelect: (id: string) => void;
+  onSplit: (clipId: string, at: number) => Promise<Outcome | undefined>;
+  onRemove: () => Promise<void>;
+  onMove: (clipId: string, trackId: string, position: number) => Promise<Outcome | undefined>;
+  onTrimStart: (clip: Clip, newIn: number, newPosition: number) => Promise<Outcome | undefined>;
+  onTrimEnd: (clip: Clip, newOut: number) => Promise<Outcome | undefined>;
   onAddTrack: (kind: TrackKind) => Promise<Outcome | undefined>;
   height: number;
   setHeight: (height: number) => void;
 }) {
+  const timeAtPointer = (event: { clientX: number }, lane: HTMLElement) =>
+    Math.max(0, Math.min(duration, ((event.clientX - lane.getBoundingClientRect().left) / lane.getBoundingClientRect().width) * duration));
   const resize = (event: React.PointerEvent<HTMLButtonElement>) => {
     const startY = event.clientY;
     const startHeight = height;
@@ -1101,6 +1188,46 @@ function Timeline({
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
+  };
+  const moveClip = (event: React.PointerEvent<HTMLButtonElement>, clip: Clip) => {
+    if (tool !== "select" || event.button !== 0) return;
+    const originX = event.clientX;
+    const sourceTrack = event.currentTarget.closest<HTMLElement>("[data-track-id]");
+    if (!sourceTrack) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const finish = (upEvent: PointerEvent) => {
+      const target = document.elementFromPoint(upEvent.clientX, upEvent.clientY)?.closest<HTMLElement>("[data-track-id]");
+      if (!target || Math.abs(upEvent.clientX - originX) < 3) return;
+      const lane = target.querySelector<HTMLElement>("[data-timeline-lane]");
+      const trackId = target.dataset.trackId;
+      if (!lane || !trackId) return;
+      const offset = ((upEvent.clientX - originX) / lane.getBoundingClientRect().width) * duration;
+      void onMove(clip.id, trackId, Math.max(0, clip.position + offset));
+    };
+    event.currentTarget.addEventListener("pointerup", finish, { once: true });
+    // A click still selects; the pointer-up handler above only mutates after a drag.
+    onSelect(clip.id);
+  };
+  const trimClip = (event: React.PointerEvent<HTMLElement>, clip: Clip, edge: "start" | "end") => {
+    event.stopPropagation();
+    const lane = event.currentTarget.closest<HTMLElement>("[data-timeline-lane]");
+    if (!lane) return;
+    const startX = event.clientX;
+    const startIn = clip.in_point;
+    const startOut = clip.out_point;
+    const startPosition = clip.position;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const finish = (upEvent: PointerEvent) => {
+      const delta = ((upEvent.clientX - startX) / lane.getBoundingClientRect().width) * duration;
+      const minimumDuration = 1_000;
+      if (edge === "start") {
+        const deltaClamped = Math.max(-startPosition, -startIn, Math.min(delta, startOut - startIn - minimumDuration));
+        void onTrimStart(clip, startIn + deltaClamped, startPosition + deltaClamped);
+      } else {
+        void onTrimEnd(clip, Math.max(startIn + minimumDuration, startOut + delta));
+      }
+    };
+    event.currentTarget.addEventListener("pointerup", finish, { once: true });
   };
   return (
     <section className="relative overflow-hidden border-t bg-card" style={{ height }}>
@@ -1114,7 +1241,7 @@ function Timeline({
             MAGNETIC
           </Badge>
         </div>
-        <div className="timeline-ruler relative">
+        <div className="timeline-ruler relative" onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}>
           {[0, 5, 10, 15, 20, 25, 30].map((second) => (
             <span
               key={second}
@@ -1124,6 +1251,14 @@ function Timeline({
           ))}
         </div>
         <div className="flex items-center justify-end gap-1 px-2">
+          <IconButton label="Selection tool (V)" aria-pressed={tool === "select"} className={tool === "select" ? "bg-accent" : ""} onClick={() => setTool("select")}><MousePointer2 /></IconButton>
+          <IconButton label="Razor tool (C)" aria-pressed={tool === "razor"} className={tool === "razor" ? "bg-accent" : ""} onClick={() => setTool("razor")}><Scissors /></IconButton>
+          <IconButton label="Split selected clip at playhead (Enter)" disabled={!selected} onClick={() => {
+            const clip = selected ? project.clips[selected] : undefined;
+            if (clip && playhead > clip.position && playhead < clip.position + clip.out_point - clip.in_point) void onSplit(clip.id, playhead);
+          }}><Scissors /></IconButton>
+          <IconButton label="Remove selected clip (Delete)" disabled={!selected} onClick={() => void onRemove()}><Trash2 /></IconButton>
+          <Separator orientation="vertical" className="mx-1 h-4" />
           <Button
             variant="ghost"
             size="xs"
@@ -1156,6 +1291,7 @@ function Timeline({
         {project.tracks.map((track) => (
           <div
             key={track.id}
+            data-track-id={track.id}
             className="grid h-16 grid-cols-[148px_1fr] border-b"
           >
             <div className="border-r px-4 py-3">
@@ -1164,7 +1300,9 @@ function Timeline({
                 {track.kind}
               </p>
             </div>
-            <div className="timeline-lane relative">
+            <div className="timeline-lane relative" data-timeline-lane onPointerDown={(event) => {
+              if (event.target === event.currentTarget) setPlayhead(timeAtPointer(event, event.currentTarget));
+            }}>
               {track.clip_order.map((id) => {
                 const clip = project.clips[id];
                 if (!clip) return null;
@@ -1176,10 +1314,22 @@ function Timeline({
                 return (
                   <button
                     key={id}
-                    onClick={() => onSelect(id)}
-                    className={`timeline-clip ${selected === id ? "is-selected" : ""}`}
+                    onPointerDown={(event) => {
+                      if (tool === "razor") {
+                        event.stopPropagation();
+                        const lane = event.currentTarget.closest<HTMLElement>("[data-timeline-lane]");
+                        if (lane) void onSplit(id, timeAtPointer(event, lane));
+                        return;
+                      }
+                      moveClip(event, clip);
+                    }}
+                    className={`timeline-clip ${selected === id ? "is-selected" : ""} ${tool === "razor" ? "is-razor" : ""}`}
                     style={{ left: `${left}%`, width: `${width}%` }}
                   >
+                    {selected === id && tool === "select" && <>
+                      <span className="timeline-trim-handle timeline-trim-start" role="button" aria-label="Trim clip start" onPointerDown={(event) => trimClip(event, clip, "start")} />
+                      <span className="timeline-trim-handle timeline-trim-end" role="button" aria-label="Trim clip end" onPointerDown={(event) => trimClip(event, clip, "end")} />
+                    </>}
                     <Clapperboard />
                     <span>{fileName(clip.source_path)}</span>
                     {clip.stabilization && (
