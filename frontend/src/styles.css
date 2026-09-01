@@ -33,6 +33,10 @@
 .timeline-tool kbd { margin-left: 2px; color: oklch(.45 0 0); font-size: 9px; }
 .timeline-tool.is-active { border-color: oklch(1 0 0 / 30%); background: oklch(.28 0 0); color: oklch(.98 0 0); box-shadow: inset 0 -2px oklch(.98 0 0); }
 .timeline-tool.is-active kbd { color: oklch(.78 0 0); }
+.timeline-clip.is-moving { z-index: 12; opacity: .84; box-shadow: 0 8px 22px oklch(0 0 0 / 42%); }
+.timeline-playhead-line { width: 2px; background: oklch(.63 .25 27); box-shadow: 0 0 10px oklch(.63 .25 27 / 78%); }
+.timeline-playhead { width: 18px; height: 18px; transform: translate(-50%, -25%); border: 0; background: transparent; padding: 0; cursor: ew-resize; touch-action: none; }
+.timeline-playhead::before { position: absolute; inset: 4px; transform: rotate(45deg); background: oklch(.63 .25 27); content: ""; }
 .timeline-editor.is-razor .timeline-ruler,
 .timeline-editor.is-razor .timeline-lane,
 .timeline-editor.is-razor .timeline-clip {
