@@ -12,6 +12,7 @@ import {
   Clapperboard,
   Command,
   Download,
+  Film,
   FolderInput,
   FolderOpen,
   GripHorizontal,
@@ -21,8 +22,10 @@ import {
   Play,
   Plus,
   RotateCw,
+  Scissors,
   Send,
   Settings,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Undo2,
@@ -107,6 +110,20 @@ type Provider = {
 };
 type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number };
 type RecentProject = { path: string; name: string; openedAt: number };
+type WorkflowPhase = "import" | "stabilize" | "cut" | "grade" | "export";
+const workflowPhases: {
+  id: WorkflowPhase;
+  label: string;
+  eyebrow: string;
+  description: string;
+  icon: typeof FolderInput;
+}[] = [
+  { id: "import", label: "Import", eyebrow: "01 · Media", description: "Link your sources and choose the takes worth keeping.", icon: FolderInput },
+  { id: "stabilize", label: "Stabilize", eyebrow: "02 · Motion", description: "Tune horizon lock and motion handling for each take.", icon: SlidersHorizontal },
+  { id: "cut", label: "Edit", eyebrow: "03 · Timeline", description: "Arrange moments, trim clips, and set the rhythm.", icon: Scissors },
+  { id: "grade", label: "Look", eyebrow: "04 · Color", description: "Apply LUTs and define the final image treatment.", icon: Film },
+  { id: "export", label: "Export", eyebrow: "05 · Delivery", description: "Review the timeline and prepare the final flight cut.", icon: Download },
+];
 const preferencesKey = "fpv-editor-preferences";
 const recentProjectsKey = "fpv-editor-recent-projects";
 const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220 };
@@ -195,6 +212,7 @@ function App() {
   const [selected, setSelected] = useState<string>();
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [activePhase, setActivePhase] = useState<WorkflowPhase>("import");
   const [undoable, setUndoable] = useState(false);
   const [redoable, setRedoable] = useState(false);
   const [notice, setNotice] = useState("Ready to edit");
@@ -212,6 +230,12 @@ function App() {
     },
   ]);
   const selectedClip = selected ? project.clips[selected] : undefined;
+  const activePhaseIndex = workflowPhases.findIndex((phase) => phase.id === activePhase);
+  const activeWorkflowPhase = workflowPhases[activePhaseIndex];
+  const showTimeline = activePhase === "cut";
+  const showMedia = activePhase !== "export";
+  const showInspector = activePhase === "stabilize" || activePhase === "cut" || activePhase === "grade";
+  const showCopilot = activePhase === "cut" && copilotOpen;
   const duration = useMemo(
     () =>
       Math.max(
@@ -390,8 +414,8 @@ function App() {
   return (
     <TooltipProvider>
       <main className="relative min-h-screen min-w-[1120px] bg-background text-foreground">
-        <header className="flex h-14 items-center border-b px-5">
-          <div className="flex w-72 items-center gap-3">
+        <header className="app-header border-b px-5">
+          <div className="flex items-center gap-3">
             <div className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
               <Video />
             </div>
@@ -402,14 +426,21 @@ function App() {
               </p>
             </div>
           </div>
-          <div className="flex flex-1 items-center justify-center gap-2">
+          <nav className="header-workflow" aria-label="Editing workflow">
+            <div className="header-workflow-phases" role="tablist" aria-label="Editing phases">
+              {workflowPhases.map((phase, index) => {
+                const Icon = phase.icon;
+                const isActive = phase.id === activePhase;
+                return <button key={phase.id} type="button" role="tab" aria-selected={isActive} title={phase.description} className={`workflow-phase ${isActive ? "is-active" : ""} ${index < activePhaseIndex ? "is-complete" : ""}`} onClick={() => setActivePhase(phase.id)}><span className="workflow-phase-number">{String(index + 1).padStart(2, "0")}</span><Icon /><span>{phase.label}</span></button>;
+              })}
+            </div>
+          </nav>
+          <div className="header-project">
             <Circle className="size-2 fill-foreground" />
             <span className="font-mono text-xs">{project.name}</span>
-            <span className="text-xs text-muted-foreground">
-              {project.width} × {project.height} · {project.fps} fps
-            </span>
+            <span className="text-xs text-muted-foreground">{project.width} × {project.height} · {project.fps} fps</span>
           </div>
-          <div className="flex w-72 justify-end gap-1">
+          <div className="flex justify-end gap-1">
             <Button
               variant="ghost"
               size="sm"
@@ -431,55 +462,27 @@ function App() {
             </IconButton>
           </div>
         </header>
-        <nav className="flex h-11 items-center gap-2 border-b px-4">
-          <Button size="sm" onClick={() => void importMedia()}>
-            <Plus data-icon="inline-start" />
-            Import media
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => void importFolder()}>
-            <FolderInput data-icon="inline-start" />
-            Import folder
-          </Button>
-          <Separator orientation="vertical" className="mx-1 h-4" />
-          <IconButton
-            label="Undo"
-            disabled={!undoable}
-            onClick={() => invoke<Outcome>("undo").then(apply)}
-          >
-            <Undo2 />
-          </IconButton>
-          <IconButton
-            label="Redo"
-            disabled={!redoable}
-            onClick={() => invoke<Outcome>("redo").then(apply)}
-          >
-            <RotateCw />
-          </IconButton>
-          <p className="ml-2 flex-1 truncate text-xs text-muted-foreground">
-            {notice}
-          </p>
-          <Button
-            variant={copilotOpen ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setPreference("copilotOpen", !copilotOpen)}
-          >
-            <Sparkles data-icon="inline-start" />
-            Copilot
-          </Button>
-        </nav>
+        <div className="phase-toolbar border-b">
+          <div><span className="font-mono text-[10px] uppercase tracking-[.14em] text-muted-foreground">{activeWorkflowPhase.eyebrow}</span><span className="phase-description">{activeWorkflowPhase.description}</span></div>
+          <div className="workflow-actions">
+            {activePhase === "import" && <><Button size="sm" onClick={() => void importMedia()}><Plus data-icon="inline-start" />Choose media</Button><Button variant="outline" size="sm" onClick={() => void importFolder()}><FolderInput data-icon="inline-start" />Choose folder</Button></>}
+            {activePhase === "cut" && <Button variant={copilotOpen ? "secondary" : "ghost"} size="sm" onClick={() => setPreference("copilotOpen", !copilotOpen)}><Sparkles data-icon="inline-start" />Copilot</Button>}
+            <IconButton label="Undo" disabled={!undoable} onClick={() => invoke<Outcome>("undo").then(apply)}><Undo2 /></IconButton><IconButton label="Redo" disabled={!redoable} onClick={() => invoke<Outcome>("redo").then(apply)}><RotateCw /></IconButton>
+          </div>
+        </div>
         <section
           className="grid min-h-0"
           style={{
             gridTemplateColumns: [
-              mediaOpen ? "230px" : "42px",
+              showMedia ? (mediaOpen ? "230px" : "42px") : "0px",
               "minmax(420px,1fr)",
-              inspectorOpen ? "270px" : "42px",
-              ...(copilotOpen ? ["310px"] : []),
+              ...(showInspector ? [inspectorOpen ? "270px" : "42px"] : []),
+              ...(showCopilot ? ["310px"] : []),
             ].join(" "),
-            height: `calc(100vh - ${timelineHeight + 95}px)`,
+            height: `calc(100vh - ${showTimeline ? timelineHeight + 103 : 103}px)`,
           }}
         >
-          <aside className="border-r bg-card">
+          {showMedia && <aside className="border-r bg-card">
             <PanelTitle icon={<Layers2 />} title="Media" open={mediaOpen} onToggle={() => setPreference("mediaOpen", !mediaOpen)} />
             {mediaOpen && <div className="p-3">
               {Object.values(project.clips).length === 0 ? (
@@ -507,26 +510,26 @@ function App() {
                 </div>
               )}
             </div>}
-          </aside>
+          </aside>}
           <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px] bg-muted/30">
-            <Preview
+            {activePhase === "export" ? <ExportWorkspace project={project} selectedClip={selectedClip} saveProject={saveProject} /> : <Preview
               selectedClip={selectedClip}
               playhead={playhead}
               duration={duration}
               playing={playing}
               setPlayhead={setPlayhead}
               setPlaying={setPlaying}
-            />
+            />}
           </section>
-          <aside className="border-l bg-card">
+          {showInspector && <aside className="border-l bg-card">
             <PanelTitle icon={<Command />} title="Inspector" open={inspectorOpen} onToggle={() => setPreference("inspectorOpen", !inspectorOpen)} />
             {inspectorOpen && (selectedClip ? (
-              <ClipInspector clip={selectedClip} command={command} />
+              <ClipInspector clip={selectedClip} command={command} phase={activePhase} />
             ) : (
               <EmptyInspector />
             ))}
-          </aside>
-          {copilotOpen && (
+          </aside>}
+          {showCopilot && (
             <Copilot
               messages={messages}
               prompt={prompt}
@@ -536,7 +539,7 @@ function App() {
             />
           )}
         </section>
-        <Timeline
+        {showTimeline && <Timeline
           project={project}
           selected={selected}
           duration={duration}
@@ -545,7 +548,7 @@ function App() {
           onAddTrack={addTrack}
           height={timelineHeight}
           setHeight={(height) => setPreference("timelineHeight", height)}
-        />
+        />}
         <SettingsDialog
           open={settingsOpen}
           setOpen={setSettingsOpen}
@@ -632,6 +635,9 @@ function EmptyInspector() {
       </div>
     </div>
   );
+}
+function ExportWorkspace({ project, selectedClip, saveProject }: { project: Project; selectedClip?: Clip; saveProject: () => Promise<void> }) {
+  return <section className="grid place-items-center p-8"><div className="w-full max-w-xl"><Badge variant="outline" className="mb-5 font-mono text-[10px] uppercase tracking-[.18em]">Final check</Badge><h1 className="font-heading text-2xl font-semibold">Ready to deliver?</h1><p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Review the project settings, save your edit, then render from the export pipeline.</p><div className="mt-7 grid grid-cols-3 gap-px overflow-hidden rounded-lg border bg-border"><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Clips</p><p className="mt-1 text-lg font-medium">{Object.keys(project.clips).length}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Format</p><p className="mt-1 text-lg font-medium">{project.width}×{project.height}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Frame rate</p><p className="mt-1 text-lg font-medium">{project.fps} fps</p></div></div><Card className="mt-5 shadow-none"><CardHeader><CardTitle className="text-sm">Desktop export</CardTitle><CardDescription className="text-xs">Save the project now. Final rendering is currently available through the project export pipeline; this workspace keeps delivery settings separate from the edit.</CardDescription></CardHeader><CardContent><Button onClick={() => void saveProject()}><Download data-icon="inline-start" />Save project</Button>{selectedClip && <p className="mt-3 text-xs text-muted-foreground">Selected clip: {fileName(selectedClip.source_path)}</p>}</CardContent></Card></div></section>;
 }
 function Preview({
   selectedClip,
@@ -780,9 +786,11 @@ function Preview({
 function ClipInspector({
   clip,
   command,
+  phase,
 }: {
   clip: Clip;
   command: (value: object) => Promise<Outcome | undefined>;
+  phase: WorkflowPhase;
 }) {
   const [smoothness, setSmoothness] = useState(
     clip.stabilization?.smoothness ?? 0.55,
@@ -794,6 +802,10 @@ function ClipInspector({
     dynamic_fov: clip.stabilization?.dynamic_fov ?? 0.12,
     ...more,
   });
+  const chooseLut = async () => {
+    const selection = await open({ multiple: false, filters: [{ name: "LUT", extensions: ["cube", "3dl"] }] });
+    if (typeof selection === "string") void command({ command: "apply_lut", clip_id: clip.id, lut_path: selection });
+  };
   return (
     <div className="h-[calc(100%-44px)]">
       <div className="flex flex-col gap-5 p-4">
@@ -807,7 +819,7 @@ function ClipInspector({
             </CardDescription>
           </CardHeader>
         </Card>
-        <div className="flex flex-col gap-3">
+        {phase === "stabilize" && <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium">Stabilization</p>
             <Badge variant={clip.stabilization ? "secondary" : "outline"}>
@@ -857,8 +869,8 @@ function ClipInspector({
               }
             />
           </div>
-        </div>
-        <Separator />
+        </div>}
+        {phase === "cut" && <>
         <ToggleGroup
           type="single"
           defaultValue="1"
@@ -894,6 +906,12 @@ function ClipInspector({
           <Trash2 data-icon="inline-start" />
           Remove clip
         </Button>
+        </>}
+        {phase === "grade" && <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between"><p className="text-xs font-medium">Color treatment</p><Badge variant={clip.lut_path ? "secondary" : "outline"}>{clip.lut_path ? "Applied" : "No LUT"}</Badge></div>
+          <Card size="sm" className="shadow-none"><CardHeader><CardTitle className="truncate text-xs">{clip.lut_path ? fileName(clip.lut_path) : "No LUT selected"}</CardTitle><CardDescription className="text-xs">LUTs are applied during preview and export.</CardDescription></CardHeader></Card>
+          <Button size="sm" onClick={() => void chooseLut()}><Film data-icon="inline-start" />Choose LUT</Button>
+        </div>}
       </div>
     </div>
   );
