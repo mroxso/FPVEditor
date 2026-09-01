@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/mroxso/FPVEditor/compare/v0.5.0...v0.6.0) (2026-09-01)
+
+
+### Features
+
+* add timeline edit tools ([#12](https://github.com/mroxso/FPVEditor/issues/12)) ([056fe74](https://github.com/mroxso/FPVEditor/commit/056fe7481ffac735cdf8b1893e0600767e2564c3))
+
 ## [0.5.0](https://github.com/mroxso/FPVEditor/compare/v0.4.1...v0.5.0) (2026-09-01)
 
 
