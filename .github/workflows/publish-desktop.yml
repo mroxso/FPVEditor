@@ -69,6 +69,11 @@ jobs:
         with:
           projectPath: crates/fpv-app
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+      - name: Verify frontend assets were built
+        shell: bash
+        run: |
+          test -s frontend/dist/index.html
+          test "$(find frontend/dist/assets -type f | wc -l)" -gt 0
       - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
