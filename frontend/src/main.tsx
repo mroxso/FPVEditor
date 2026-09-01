@@ -67,6 +67,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import fpvEditorLogo from "@/assets/fpv-editor-logo.svg";
 import "./styles.css";
 
 type TrackKind = "Video" | "Audio";
@@ -200,7 +201,7 @@ function ProjectLauncher({
     <main className="grid min-h-screen place-items-center bg-background p-8 text-foreground">
       <section className="grid w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-2xl md:grid-cols-[1fr_1.25fr]">
         <div className="flex min-h-[440px] flex-col justify-between border-r bg-muted/30 p-8">
-          <div><div className="mb-5 grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground"><Video /></div><p className="font-heading text-xl font-semibold">FPV Editor</p><p className="mt-2 max-w-xs text-sm leading-6 text-muted-foreground">Start a new cut or pick up where your last flight left off.</p></div>
+          <div><img className="mb-5 size-10" src={fpvEditorLogo} alt="FPV Editor" /><p className="font-heading text-xl font-semibold">FPV Editor</p><p className="mt-2 max-w-xs text-sm leading-6 text-muted-foreground">Start a new cut or pick up where your last flight left off.</p></div>
           <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">Desktop cut suite · v0.1.0</p>
         </div>
         <div className="p-8">
@@ -477,9 +478,7 @@ function App() {
       <main className="relative min-h-screen min-w-[1120px] bg-background text-foreground">
         <header className="app-header border-b px-5">
           <div className="flex items-center gap-3">
-            <div className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-              <Video />
-            </div>
+            <img className="size-7" src={fpvEditorLogo} alt="" />
             <div>
               <p className="font-heading text-sm font-semibold">FPV Editor</p>
               <p className="text-[10px] uppercase tracking-[.16em] text-muted-foreground">

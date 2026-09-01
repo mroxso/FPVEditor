@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">FPV Editor logo</title>
+  <desc id="desc">A stylised FPV drone and play symbol on a white rounded square.</desc>
+  <rect width="256" height="256" rx="48" fill="#fff"/>
+  <g fill="#050505">
+    <path d="M75 51a20 20 0 1 0 0 40 20 20 0 0 0 0-40Zm106 0a20 20 0 1 0 0 40 20 20 0 0 0 0-40ZM92 82l27 27 9-9 9 9 27-27 11 11-27 27a20 20 0 0 1-28 0l-1-1-1 1a20 20 0 0 1-28 0L81 93Z"/>
+    <path d="M37 104a8 8 0 0 1 11-3l31 16a8 8 0 0 1-7 14l-31-16a8 8 0 0 1-4-11Zm182 0a8 8 0 0 0-11-3l-31 16a8 8 0 0 0 7 14l31-16a8 8 0 0 0 4-11Z"/>
+    <path d="M74 132h33v57H74a14 14 0 0 1-14-14v-29a14 14 0 0 1 14-14Zm75 0h33a14 14 0 0 1 14 14v29a14 14 0 0 1-14 14h-33Zm-27 13 35 21-35 21Z"/>
+    <path d="M79 204c31-8 56-12 77-12 11 0 18 2 22 6 4 4 4 9-1 14-12 12-46 22-102 30 31-15 55-26 72-33-22 1-45 0-68-5Z"/>
+  </g>
+</svg>
