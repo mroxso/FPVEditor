@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/mroxso/FPVEditor/compare/v0.6.0...v0.6.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* restore collapsed sidebar controls ([#16](https://github.com/mroxso/FPVEditor/issues/16)) ([586891e](https://github.com/mroxso/FPVEditor/commit/586891ee9c8fcd0708dc0b7eeb2505590a4fb488))
+* synchronize timeline preview playback ([#14](https://github.com/mroxso/FPVEditor/issues/14)) ([c7ddd90](https://github.com/mroxso/FPVEditor/commit/c7ddd906e1f39ff11f0b4006858b8a56dcaad10d))
+
 ## [0.6.0](https://github.com/mroxso/FPVEditor/compare/v0.5.0...v0.6.0) (2026-09-01)
 
 
