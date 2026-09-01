@@ -1175,8 +1175,16 @@ function Timeline({
   height: number;
   setHeight: (height: number) => void;
 }) {
+  const toTimecode = (value: number) => Math.round(Math.max(0, value));
   const timeAtPointer = (event: { clientX: number }, lane: HTMLElement) =>
-    Math.max(0, Math.min(duration, ((event.clientX - lane.getBoundingClientRect().left) / lane.getBoundingClientRect().width) * duration));
+    toTimecode(Math.min(duration, ((event.clientX - lane.getBoundingClientRect().left) / lane.getBoundingClientRect().width) * duration));
+  const splitClipAt = (clip: Clip, at: number) => {
+    const edgePadding = 1_000;
+    const start = clip.position + edgePadding;
+    const end = clip.position + clip.out_point - clip.in_point - edgePadding;
+    if (end <= start) return;
+    void onSplit(clip.id, toTimecode(Math.max(start, Math.min(end, at))));
+  };
   const resize = (event: React.PointerEvent<HTMLButtonElement>) => {
     const startY = event.clientY;
     const startHeight = height;
@@ -1202,7 +1210,7 @@ function Timeline({
       const trackId = target.dataset.trackId;
       if (!lane || !trackId) return;
       const offset = ((upEvent.clientX - originX) / lane.getBoundingClientRect().width) * duration;
-      void onMove(clip.id, trackId, Math.max(0, clip.position + offset));
+      void onMove(clip.id, trackId, toTimecode(clip.position + offset));
     };
     event.currentTarget.addEventListener("pointerup", finish, { once: true });
     // A click still selects; the pointer-up handler above only mutates after a drag.
@@ -1222,9 +1230,9 @@ function Timeline({
       const minimumDuration = 1_000;
       if (edge === "start") {
         const deltaClamped = Math.max(-startPosition, -startIn, Math.min(delta, startOut - startIn - minimumDuration));
-        void onTrimStart(clip, startIn + deltaClamped, startPosition + deltaClamped);
+        void onTrimStart(clip, toTimecode(startIn + deltaClamped), toTimecode(startPosition + deltaClamped));
       } else {
-        void onTrimEnd(clip, Math.max(startIn + minimumDuration, startOut + delta));
+        void onTrimEnd(clip, toTimecode(Math.max(startIn + minimumDuration, startOut + delta)));
       }
     };
     event.currentTarget.addEventListener("pointerup", finish, { once: true });
@@ -1340,7 +1348,7 @@ function Timeline({
                       if (tool === "razor") {
                         event.stopPropagation();
                         const lane = event.currentTarget.closest<HTMLElement>("[data-timeline-lane]");
-                        if (lane) void onSplit(id, timeAtPointer(event, lane));
+                        if (lane) splitClipAt(clip, timeAtPointer(event, lane));
                         return;
                       }
                       moveClip(event, clip);
