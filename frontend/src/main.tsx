@@ -6,12 +6,16 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Circle,
   Clapperboard,
   Command,
   Download,
   FolderInput,
   FolderOpen,
+  GripHorizontal,
+  Info,
   Layers2,
   Pause,
   Play,
@@ -49,6 +53,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
@@ -100,6 +105,14 @@ type Provider = {
   model: string;
   extra_headers: Record<string, string>;
 };
+type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number };
+type RecentProject = { path: string; name: string; openedAt: number };
+const preferencesKey = "fpv-editor-preferences";
+const recentProjectsKey = "fpv-editor-recent-projects";
+const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220 };
+const readLocal = <T,>(key: string, fallback: T): T => {
+  try { return JSON.parse(localStorage.getItem(key) ?? "") as T; } catch { return fallback; }
+};
 const seedProject: Project = {
   name: "Untitled",
   fps: 60,
@@ -142,7 +155,42 @@ function IconButton({
   );
 }
 
+function ProjectLauncher({
+  recentProjects,
+  openRecent,
+  openProject,
+  createProject,
+}: {
+  recentProjects: RecentProject[];
+  openRecent: (project: RecentProject) => Promise<void>;
+  openProject: () => Promise<void>;
+  createProject: (name: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("Untitled");
+  return (
+    <main className="grid min-h-screen place-items-center bg-background p-8 text-foreground">
+      <section className="grid w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-2xl md:grid-cols-[1fr_1.25fr]">
+        <div className="flex min-h-[440px] flex-col justify-between border-r bg-muted/30 p-8">
+          <div><div className="mb-5 grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground"><Video /></div><p className="font-heading text-xl font-semibold">FPV Editor</p><p className="mt-2 max-w-xs text-sm leading-6 text-muted-foreground">Start a new cut or pick up where your last flight left off.</p></div>
+          <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">Desktop cut suite · v0.1.0</p>
+        </div>
+        <div className="p-8">
+          <p className="mb-3 text-xs font-medium uppercase tracking-[.14em] text-muted-foreground">New project</p>
+          <div className="flex gap-2"><Input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createProject(name); }} placeholder="Project name" /><Button onClick={() => void createProject(name)}><Plus data-icon="inline-start" />Create</Button></div>
+          <Button className="mt-3 w-full" variant="outline" onClick={() => void openProject()}><FolderOpen data-icon="inline-start" />Open project file</Button>
+          <Separator className="my-7" />
+          <div className="mb-3 flex items-center justify-between"><p className="text-xs font-medium uppercase tracking-[.14em] text-muted-foreground">Recent projects</p><Badge variant="outline">{recentProjects.length}</Badge></div>
+          {recentProjects.length ? <div className="space-y-1">{recentProjects.map((recent) => <Button key={recent.path} variant="ghost" className="h-auto w-full justify-start px-2 py-2" onClick={() => void openRecent(recent)}><Clapperboard data-icon="inline-start" /><span className="min-w-0 text-left"><span className="block truncate text-sm">{recent.name}</span><span className="block truncate font-mono text-[10px] text-muted-foreground">{recent.path}</span></span></Button>)}</div> : <div className="rounded-lg border border-dashed p-5 text-center text-xs leading-5 text-muted-foreground">No recent projects yet. Create a project or open an existing <span className="font-mono">.fpv.json</span> file.</div>}
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function App() {
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [preferences, setPreferences] = useState<EditorPreferences>(() => readLocal(preferencesKey, defaultPreferences));
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => readLocal(recentProjectsKey, [] as RecentProject[]));
   const [project, setProject] = useState<Project>(seedProject);
   const [selected, setSelected] = useState<string>();
   const [playhead, setPlayhead] = useState(0);
@@ -151,7 +199,9 @@ function App() {
   const [redoable, setRedoable] = useState(false);
   const [notice, setNotice] = useState("Ready to edit");
   const [dragActive, setDragActive] = useState(false);
-  const [copilotOpen, setCopilotOpen] = useState(true);
+  const { copilotOpen, mediaOpen, inspectorOpen, timelineHeight } = preferences;
+  const setPreference = <K extends keyof EditorPreferences>(key: K, value: EditorPreferences[K]) =>
+    setPreferences((current) => ({ ...current, [key]: value }));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [provider, setProvider] = useState(defaultProvider);
   const [prompt, setPrompt] = useState("");
@@ -196,6 +246,14 @@ function App() {
   useEffect(() => {
     void refresh();
   }, []);
+  useEffect(() => { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); }, [preferences]);
+  const rememberProject = (path: string, name: string) => {
+    setRecentProjects((current) => {
+      const next = [{ path, name, openedAt: Date.now() }, ...current.filter((item) => item.path !== path)].slice(0, 8);
+      localStorage.setItem(recentProjectsKey, JSON.stringify(next));
+      return next;
+    });
+  };
   const addTrack = async (kind: TrackKind) =>
     command({
       command: "add_track",
@@ -261,6 +319,7 @@ function App() {
       });
       if (path) {
         await invoke("save_project", { path });
+        rememberProject(path, project.name);
         setNotice("Project saved");
       }
     } catch (error) {
@@ -277,6 +336,8 @@ function App() {
         const loaded = await invoke<Project>("load_project", { path });
         setProject(loaded);
         setSelected(undefined);
+        rememberProject(path, loaded.name);
+        setWorkspaceOpen(true);
         setNotice("Project loaded");
       }
     } catch (error) {
@@ -297,6 +358,16 @@ function App() {
       setNotice(`AI connection failed: ${String(error)}`);
     }
   };
+  const openRecent = async (recent: RecentProject) => {
+    try {
+      const loaded = await invoke<Project>("load_project", { path: recent.path });
+      setProject(loaded); setSelected(undefined); rememberProject(recent.path, loaded.name); setWorkspaceOpen(true);
+    } catch (error) { setNotice(`Open failed: ${String(error)}`); }
+  };
+  const createProject = async (name: string) => {
+    try { setProject(await invoke<Project>("new_project", { name })); setSelected(undefined); setWorkspaceOpen(true); } catch (error) { setNotice(`New project failed: ${String(error)}`); }
+  };
+  if (!workspaceOpen) return <ProjectLauncher recentProjects={recentProjects} openRecent={openRecent} openProject={loadProject} createProject={createProject} />;
   const chat = async () => {
     if (!prompt.trim()) return;
     const text = prompt;
@@ -390,19 +461,27 @@ function App() {
           <Button
             variant={copilotOpen ? "secondary" : "ghost"}
             size="sm"
-            onClick={() => setCopilotOpen((open) => !open)}
+            onClick={() => setPreference("copilotOpen", !copilotOpen)}
           >
             <Sparkles data-icon="inline-start" />
             Copilot
           </Button>
         </nav>
         <section
-          className={`grid min-h-0 ${copilotOpen ? "grid-cols-[230px_minmax(420px,1fr)_270px_310px]" : "grid-cols-[230px_minmax(420px,1fr)_270px]"}`}
-          style={{ height: "calc(100vh - 315px)" }}
+          className="grid min-h-0"
+          style={{
+            gridTemplateColumns: [
+              mediaOpen ? "230px" : "42px",
+              "minmax(420px,1fr)",
+              inspectorOpen ? "270px" : "42px",
+              ...(copilotOpen ? ["310px"] : []),
+            ].join(" "),
+            height: `calc(100vh - ${timelineHeight + 95}px)`,
+          }}
         >
           <aside className="border-r bg-card">
-            <PanelTitle icon={<Layers2 />} title="Media" />
-            <div className="p-3">
+            <PanelTitle icon={<Layers2 />} title="Media" open={mediaOpen} onToggle={() => setPreference("mediaOpen", !mediaOpen)} />
+            {mediaOpen && <div className="p-3">
               {Object.values(project.clips).length === 0 ? (
                 <EmptyMedia importMedia={importMedia} importFolder={importFolder} />
               ) : (
@@ -427,7 +506,7 @@ function App() {
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
           </aside>
           <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px] bg-muted/30">
             <Preview
@@ -440,12 +519,12 @@ function App() {
             />
           </section>
           <aside className="border-l bg-card">
-            <PanelTitle icon={<Command />} title="Inspector" />
-            {selectedClip ? (
+            <PanelTitle icon={<Command />} title="Inspector" open={inspectorOpen} onToggle={() => setPreference("inspectorOpen", !inspectorOpen)} />
+            {inspectorOpen && (selectedClip ? (
               <ClipInspector clip={selectedClip} command={command} />
             ) : (
               <EmptyInspector />
-            )}
+            ))}
           </aside>
           {copilotOpen && (
             <Copilot
@@ -453,7 +532,7 @@ function App() {
               prompt={prompt}
               setPrompt={setPrompt}
               chat={chat}
-              close={() => setCopilotOpen(false)}
+              close={() => setPreference("copilotOpen", false)}
             />
           )}
         </section>
@@ -464,11 +543,14 @@ function App() {
           playhead={playhead}
           onSelect={setSelected}
           onAddTrack={addTrack}
+          height={timelineHeight}
+          setHeight={(height) => setPreference("timelineHeight", height)}
         />
         <SettingsDialog
           open={settingsOpen}
           setOpen={setSettingsOpen}
           provider={provider}
+          project={project}
           setProvider={setProvider}
           saveProvider={saveProvider}
         />
@@ -487,11 +569,26 @@ function App() {
     </TooltipProvider>
   );
 }
-function PanelTitle({ icon, title }: { icon: React.ReactNode; title: string }) {
+function PanelTitle({
+  icon,
+  title,
+  open,
+  onToggle,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  open?: boolean;
+  onToggle?: () => void;
+}) {
   return (
-    <div className="flex h-11 items-center gap-2 border-b px-3 text-xs font-medium">
+    <div className="flex h-11 items-center gap-2 border-b px-2 text-xs font-medium">
       <span className="text-muted-foreground">{icon}</span>
-      {title}
+      {open !== false && <span className="flex-1">{title}</span>}
+      {onToggle && (
+        <IconButton label={`${open ? "Collapse" : "Expand"} ${title}`} onClick={onToggle}>
+          {open ? <ChevronsLeft /> : <ChevronsRight />}
+        </IconButton>
+      )}
     </div>
   );
 }
@@ -892,6 +989,8 @@ function Timeline({
   playhead,
   onSelect,
   onAddTrack,
+  height,
+  setHeight,
 }: {
   project: Project;
   selected?: string;
@@ -899,9 +998,26 @@ function Timeline({
   playhead: number;
   onSelect: (id: string) => void;
   onAddTrack: (kind: TrackKind) => Promise<Outcome | undefined>;
+  height: number;
+  setHeight: (height: number) => void;
 }) {
+  const resize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const startY = event.clientY;
+    const startHeight = height;
+    const move = (moveEvent: PointerEvent) =>
+      setHeight(Math.min(520, Math.max(140, startHeight + startY - moveEvent.clientY)));
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
   return (
-    <section className="relative h-[220px] overflow-hidden border-t bg-card">
+    <section className="relative overflow-hidden border-t bg-card" style={{ height }}>
+      <button aria-label="Resize timeline" className="timeline-resize-handle" onPointerDown={resize}>
+        <GripHorizontal />
+      </button>
       <div className="grid h-10 grid-cols-[148px_1fr_188px] border-b">
         <div className="flex items-center gap-2 border-r px-4">
           <span className="text-xs font-medium">Timeline</span>
@@ -937,7 +1053,7 @@ function Timeline({
           </Button>
         </div>
       </div>
-      <div className="relative h-[180px] overflow-auto">
+      <div className="relative overflow-auto" style={{ height: "calc(100% - 40px)" }}>
         {project.tracks.length === 0 && (
           <div className="grid h-full place-items-center text-center">
             <div>
@@ -1000,12 +1116,14 @@ function SettingsDialog({
   open,
   setOpen,
   provider,
+  project,
   setProvider,
   saveProvider,
 }: {
   open: boolean;
   setOpen: (value: boolean) => void;
   provider: Provider;
+  project: Project;
   setProvider: (value: Provider) => void;
   saveProvider: (test?: boolean) => Promise<void>;
 }) {
@@ -1015,47 +1133,58 @@ function SettingsDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>AI settings</DialogTitle>
+          <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Connect FPV Editor to any OpenAI-compatible endpoint. Keys stay in
-            this local app session.
+            Editor preferences, connected services, and application details.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="provider-base-url">Base URL</Label>
-            <Input
-              id="provider-base-url"
-              value={provider.base_url}
-              onChange={(event) => set("base_url", event.target.value)}
-              placeholder="http://localhost:11434/v1"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="provider-model">Model</Label>
-            <Input
-              id="provider-model"
-              value={provider.model}
-              onChange={(event) => set("model", event.target.value)}
-              placeholder="llama3.2 or gpt-4o-mini"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="provider-api-key">
-              API key{" "}
-              <span className="font-normal text-muted-foreground">
-                (optional)
-              </span>
-            </Label>
-            <Input
-              id="provider-api-key"
-              type="password"
-              value={provider.api_key ?? ""}
-              onChange={(event) => set("api_key", event.target.value || null)}
-              placeholder="sk-…"
-            />
-          </div>
-        </div>
+        <Tabs defaultValue="general">
+          <TabsList className="w-full">
+            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="ai">AI</TabsTrigger>
+            <TabsTrigger value="info">Info</TabsTrigger>
+          </TabsList>
+          <TabsContent value="general" className="mt-4 space-y-3">
+            <Card size="sm" className="shadow-none">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Preview processing</CardTitle>
+                <CardDescription className="text-xs">Interactive previews are rendered at up to 960px wide with one background worker.</CardDescription>
+              </CardHeader>
+            </Card>
+            <Card size="sm" className="shadow-none">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Current project</CardTitle>
+                <CardDescription className="font-mono text-xs">{project.width} × {project.height} · {project.fps} FPS · {Object.keys(project.clips).length} clips</CardDescription>
+              </CardHeader>
+            </Card>
+          </TabsContent>
+          <TabsContent value="ai" className="mt-4 space-y-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="provider-base-url">Base URL</Label>
+              <Input id="provider-base-url" value={provider.base_url} onChange={(event) => set("base_url", event.target.value)} placeholder="http://localhost:11434/v1" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="provider-model">Model</Label>
+              <Input id="provider-model" value={provider.model} onChange={(event) => set("model", event.target.value)} placeholder="llama3.2 or gpt-4o-mini" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="provider-api-key">API key <span className="font-normal text-muted-foreground">(optional)</span></Label>
+              <Input id="provider-api-key" type="password" value={provider.api_key ?? ""} onChange={(event) => set("api_key", event.target.value || null)} placeholder="sk-…" />
+            </div>
+          </TabsContent>
+          <TabsContent value="info" className="mt-4">
+            <Card size="sm" className="shadow-none">
+              <CardHeader className="flex-row items-start gap-3 space-y-0">
+                <div className="grid size-8 place-items-center rounded-md bg-secondary"><Info className="size-4" /></div>
+                <div>
+                  <CardTitle className="text-sm">FPV Editor</CardTitle>
+                  <CardDescription className="mt-1 text-xs">Version 0.1.0 · Desktop cut suite</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0 text-xs leading-5 text-muted-foreground">Built with Tauri, Rust, React, and FFmpeg. Original media remains linked in place.</CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
         <DialogFooter>
           <Button variant="outline" onClick={() => void saveProvider(true)}>
             Test connection

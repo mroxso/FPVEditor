@@ -73,6 +73,14 @@ impl AppState {
         Ok(project)
     }
 
+    /// Start a fresh unsaved project from the launcher.
+    pub async fn new_project(&self, name: String) -> Project {
+        let project = Project::new(if name.trim().is_empty() { "Untitled" } else { &name });
+        *self.bus.lock().await = CommandBus::new(project.clone());
+        *self.project_path.lock().await = None;
+        project
+    }
+
     pub async fn save_project(&self, path: &Path) -> Result<()> {
         let bus = self.bus.lock().await;
         fpv_core::project_file::save(bus.project(), path)

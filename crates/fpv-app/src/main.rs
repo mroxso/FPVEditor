@@ -47,6 +47,11 @@ async fn load_project(
 }
 
 #[tauri::command]
+async fn new_project(state: State<'_, AppState>, name: String) -> AppResult<Project> {
+    Ok(state.new_project(name).await)
+}
+
+#[tauri::command]
 async fn save_project(state: State<'_, AppState>, path: String) -> AppResult<()> {
     app_error(state.save_project(&PathBuf::from(path)).await)
 }
@@ -114,6 +119,7 @@ fn main() {
             undo,
             redo,
             load_project,
+            new_project,
             save_project,
             probe_media,
             import_media,
