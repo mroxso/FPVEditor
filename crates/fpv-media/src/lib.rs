@@ -12,3 +12,4 @@ pub use export::{
     preview_dimensions, ExportSettings,
 };
 pub use probe::{probe, MediaInfo};
+pub use process::set_bundled_binary_dir;

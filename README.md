@@ -37,7 +37,7 @@ server, so every timeline change uses the same command bus with undo/redo suppor
 
 - Rust stable (edition 2021)
 - Node.js and npm
-- `ffmpeg` and `ffprobe` on `PATH` for media operations and the full test suite
+- `ffmpeg` and `ffprobe` on `PATH` for CLI media operations, development, and the full test suite
 - A usable `wgpu` adapter for GPU tests (Metal, Vulkan, or DX12)
 
 On macOS, FFmpeg can be installed with:
@@ -54,6 +54,11 @@ cd FPVEditor
 cd frontend && npm install && cd ..
 cargo run -p fpv-app
 ```
+
+Release builds bundle FFmpeg and FFprobe, so end users do not need a separate
+installation. The CLI and local development still resolve FFmpeg from
+`FPV_FFMPEG_PATH`, `FPV_FFPROBE_PATH`, or `PATH`. See the
+[FFmpeg distribution notice](docs/legal/ffmpeg.md) for source and license details.
 
 The frontend development server is available separately at `http://127.0.0.1:1420`:
 

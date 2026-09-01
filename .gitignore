@@ -5,3 +5,10 @@
 frontend/node_modules/
 frontend/dist/
 crates/fpv-app/gen/
+crates/fpv-app/binaries/ffmpeg
+crates/fpv-app/binaries/ffmpeg.exe
+crates/fpv-app/binaries/ffprobe
+crates/fpv-app/binaries/ffprobe.exe
+crates/fpv-app/binaries/FFMPEG-BUILD.txt
+crates/fpv-app/binaries/FFMPEG-LGPL-2.1.txt
+crates/fpv-app/binaries/FFMPEG-VERSION.txt
