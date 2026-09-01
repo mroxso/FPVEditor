@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fpv_core::Clip;
+use fpv_core::{Clip, Project, TrackKind};
 
 use crate::error::MediaResult;
 use crate::process;
@@ -88,6 +88,102 @@ pub fn export_clip(clip: &Clip, settings: &ExportSettings) -> MediaResult<()> {
     process::run("ffmpeg", &args)
 }
 
+/// Render the visible video timeline into an H.264 preview file.  Each clip
+/// is first passed through the same renderer used by export, then placed at
+/// its timeline position.  This deliberately makes the editor monitor match
+/// trim, speed, LUT, and stabilization-crop output instead of showing a raw
+/// source file.
+///
+/// Video tracks are composited in track order (later tracks are on top).  The
+/// preview is video-only for now; audio mixing belongs in the final export
+/// pipeline, where track gain and transitions can be represented explicitly.
+pub fn export_timeline_preview(project: &Project, output_path: &Path) -> MediaResult<()> {
+    let clips: Vec<&Clip> = project
+        .tracks
+        .iter()
+        .filter(|track| track.kind == TrackKind::Video)
+        .flat_map(|track| {
+            track
+                .clip_order
+                .iter()
+                .filter_map(|id| project.clips.get(id))
+        })
+        .collect();
+    if clips.is_empty() {
+        return Err(crate::error::MediaError::Parse(
+            "timeline has no video clips".into(),
+        ));
+    }
+
+    let cache_dir = output_path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = output_path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("preview");
+    let settings_for = |path: PathBuf| ExportSettings {
+        output_path: path,
+        width: project.width,
+        height: project.height,
+        fps: project.fps,
+        crf: Some(28),
+    };
+    let mut rendered = Vec::with_capacity(clips.len());
+    for (index, clip) in clips.iter().enumerate() {
+        let path = cache_dir.join(format!("{stem}-clip-{index}.mp4"));
+        export_clip(clip, &settings_for(path.clone()))?;
+        rendered.push(path);
+    }
+
+    let duration = (project.duration().seconds()).max(0.01);
+    let mut args = vec![
+        "-y".into(),
+        "-f".into(),
+        "lavfi".into(),
+        "-i".into(),
+        format!(
+            "color=c=black:s={}x{}:r={}:d={duration}",
+            project.width, project.height, project.fps
+        ),
+    ];
+    for path in &rendered {
+        args.extend(["-i".into(), path.to_string_lossy().into_owned()]);
+    }
+    let mut filter = String::new();
+    let mut previous = "[0:v]".to_string();
+    for (index, clip) in clips.iter().enumerate() {
+        let label = format!("[clip{index}]");
+        let output = format!("[layer{index}]");
+        filter.push_str(&format!(
+            "[{}:v]setpts=PTS-STARTPTS+{:.6}/TB{};{}{}overlay=eof_action=pass:shortest=0{};",
+            index + 1,
+            clip.position.seconds(),
+            label,
+            previous,
+            label,
+            output,
+        ));
+        previous = output;
+    }
+    filter.push_str(&format!("{}format=yuv420p[preview]", previous));
+    args.extend([
+        "-filter_complex".into(),
+        filter,
+        "-map".into(),
+        "[preview]".into(),
+        "-an".into(),
+        "-c:v".into(),
+        "libx264".into(),
+        "-preset".into(),
+        "ultrafast".into(),
+        "-crf".into(),
+        "28".into(),
+        "-movflags".into(),
+        "+faststart".into(),
+        output_path.to_string_lossy().into_owned(),
+    ]);
+    process::run("ffmpeg", &args)
+}
+
 /// Generate a proxy (low-res, fast-decode) rendition of a source file for
 /// smooth editing playback of large 4K/60 footage.
 pub fn generate_proxy(source: &Path, output: &Path, max_height: u32) -> MediaResult<()> {
@@ -114,7 +210,11 @@ mod tests {
     use fpv_core::{Clip, StabilizationProfile, Timecode};
 
     fn base_clip() -> Clip {
-        Clip::new("input.mp4", Timecode::from_seconds(1.0), Timecode::from_seconds(4.0))
+        Clip::new(
+            "input.mp4",
+            Timecode::from_seconds(1.0),
+            Timecode::from_seconds(4.0),
+        )
     }
 
     fn base_settings() -> ExportSettings {
@@ -200,21 +300,32 @@ mod tests {
             eprintln!("skipping: ffmpeg not available on PATH");
             return;
         }
-        let dir = std::env::temp_dir().join(format!("fpv-media-export-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("fpv-media-export-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let source = dir.join("src.mp4");
         let out = dir.join("out.mp4");
 
         let gen_args: Vec<String> = [
-            "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
-            "-pix_fmt", "yuv420p", source.to_str().unwrap(),
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=320x240:rate=30:duration=2",
+            "-pix_fmt",
+            "yuv420p",
+            source.to_str().unwrap(),
         ]
         .into_iter()
         .map(String::from)
         .collect();
         process::run("ffmpeg", &gen_args).unwrap();
 
-        let clip = Clip::new(&source, Timecode::from_seconds(0.0), Timecode::from_seconds(1.0));
+        let clip = Clip::new(
+            &source,
+            Timecode::from_seconds(0.0),
+            Timecode::from_seconds(1.0),
+        );
         let settings = ExportSettings {
             output_path: out.clone(),
             width: 160,
@@ -229,6 +340,61 @@ mod tests {
         assert_eq!(info.width, 160);
         assert_eq!(info.height, 120);
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn timeline_preview_composites_positioned_clips_into_a_playable_video() {
+        if !process::is_available("ffmpeg") {
+            eprintln!("skipping: ffmpeg not available on PATH");
+            return;
+        }
+        use fpv_core::{Command, CommandBus, NewClip, Project, TrackKind};
+
+        let dir = std::env::temp_dir().join(format!("fpv-timeline-preview-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("src.mp4");
+        process::run(
+            "ffmpeg",
+            &[
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=160x120:rate=24:duration=2",
+                "-pix_fmt",
+                "yuv420p",
+                source.to_str().unwrap(),
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let mut bus = CommandBus::new(Project::new("preview"));
+        bus.execute(Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V1".into(),
+        })
+        .unwrap();
+        let track_id = bus.project().tracks[0].id;
+        for position in [0.0, 1.0] {
+            bus.execute(Command::AddClip {
+                track_id,
+                clip: NewClip {
+                    source_path: source.clone(),
+                    in_point: Timecode::ZERO,
+                    out_point: Timecode::from_seconds(1.0),
+                    position: Timecode::from_seconds(position),
+                },
+            })
+            .unwrap();
+        }
+        let output = dir.join("timeline.mp4");
+        export_timeline_preview(bus.project(), &output).unwrap();
+        let info = crate::probe::probe(&output).unwrap();
+        assert_eq!((info.width, info.height), (1920, 1080));
+        assert!(info.duration_us >= 1_900_000);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -205,6 +205,41 @@ impl AppState {
         fpv_media::export_clip(clip, settings).context("ffmpeg export failed")
     }
 
+    /// Build a self-contained monitor rendition. Keeping this in the service
+    /// layer ensures the desktop UI never has to guess how project effects
+    /// should be applied.
+    pub async fn render_preview(&self, clip_id: Option<fpv_core::ClipId>) -> Result<PathBuf> {
+        let project = self.bus.lock().await.project().clone();
+        let root = std::env::temp_dir().join("fpv-editor-preview");
+        fs::create_dir_all(&root).context("cannot create preview cache")?;
+        let token = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        );
+        let output = root.join(format!("{token}.mp4"));
+        if let Some(id) = clip_id {
+            let clip = project.clip(id).context("selected clip no longer exists")?;
+            fpv_media::export_clip(
+                clip,
+                &fpv_media::ExportSettings {
+                    output_path: output.clone(),
+                    width: project.width,
+                    height: project.height,
+                    fps: project.fps,
+                    crf: Some(28),
+                },
+            )
+            .context("could not render clip preview")?;
+        } else {
+            fpv_media::export_timeline_preview(&project, &output)
+                .context("could not render timeline preview")?;
+        }
+        Ok(output)
+    }
+
     /// PLAN.md section 4.1: configure the AI provider (base URL/key/model).
     pub async fn configure_ai(&self, config: ProviderConfig) {
         *self.ai_config.lock().await = Some(config);
@@ -298,7 +333,7 @@ mod tests {
         std::fs::write(&nested_source, []).unwrap();
         std::fs::write(root.join("notes.txt"), []).unwrap();
 
-        let found = collect_media_files(&[root.clone()]).unwrap();
+        let found = collect_media_files(std::slice::from_ref(&root)).unwrap();
 
         assert_eq!(found, vec![source, nested_source]);
         std::fs::remove_dir_all(root).ok();

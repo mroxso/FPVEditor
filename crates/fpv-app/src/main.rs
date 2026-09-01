@@ -76,6 +76,19 @@ async fn import_media(
 }
 
 #[tauri::command]
+async fn render_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    clip_id: Option<fpv_core::ClipId>,
+) -> AppResult<String> {
+    let path = app_error(state.render_preview(clip_id).await)?;
+    app.asset_protocol_scope()
+        .allow_file(&path)
+        .map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 async fn configure_ai(state: State<'_, AppState>, config: ProviderConfig) -> AppResult<()> {
     state.configure_ai(config).await;
     Ok(())
@@ -104,6 +117,7 @@ fn main() {
             save_project,
             probe_media,
             import_media,
+            render_preview,
             configure_ai,
             test_ai_connection,
             chat

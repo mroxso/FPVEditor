@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -165,7 +165,7 @@ function App() {
   const duration = useMemo(
     () =>
       Math.max(
-        30_000_000,
+        1_000_000,
         ...Object.values(project.clips).map(
           (clip) => clip.position + clip.out_point - clip.in_point,
         ),
@@ -196,15 +196,6 @@ function App() {
   useEffect(() => {
     void refresh();
   }, []);
-  useEffect(() => {
-    if (!playing) return;
-    const timer = window.setInterval(
-      () =>
-        setPlayhead((current) => (current >= duration ? 0 : current + 100_000)),
-      100,
-    );
-    return () => window.clearInterval(timer);
-  }, [playing, duration]);
   const addTrack = async (kind: TrackKind) =>
     command({
       command: "add_track",
@@ -560,7 +551,50 @@ function Preview({
   setPlayhead: (value: number) => void;
   setPlaying: (value: boolean) => void;
 }) {
-  const source = selectedClip ? mediaSource(selectedClip.source_path) : undefined;
+  const video = useRef<HTMLVideoElement>(null);
+  const [mode, setMode] = useState<"clip" | "timeline">("timeline");
+  const [source, setSource] = useState<string>();
+  const [rendering, setRendering] = useState(false);
+  const [error, setError] = useState<string>();
+  const selectedId = selectedClip?.id;
+  useEffect(() => {
+    let active = true;
+    setSource(undefined);
+    setError(undefined);
+    if (mode === "clip" && !selectedId) return;
+    setRendering(true);
+    void invoke<string>("render_preview", {
+      clipId: mode === "clip" ? selectedId : null,
+    })
+      .then((path) => {
+        if (active) setSource(mediaSource(path));
+      })
+      .catch((reason) => {
+        if (!active) return;
+        // Development in a browser has no Tauri renderer; direct source
+        // playback still makes the single-clip monitor useful there.
+        const fallback = mode === "clip" && selectedClip
+          ? mediaSource(selectedClip.source_path)
+          : undefined;
+        setSource(fallback);
+        setError(`Preview render failed: ${String(reason)}`);
+      })
+      .finally(() => {
+        if (active) setRendering(false);
+      });
+    return () => { active = false; };
+  }, [mode, selectedId, selectedClip]);
+  useEffect(() => {
+    const element = video.current;
+    if (!element) return;
+    if (playing) void element.play().catch(() => setPlaying(false));
+    else element.pause();
+  }, [playing, source, setPlaying]);
+  const seek = (next: number) => {
+    const value = Math.max(0, Math.min(duration, next));
+    setPlayhead(value);
+    if (video.current) video.current.currentTime = value / 1_000_000;
+  };
   return (
     <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px]">
       <div className="grid place-items-center p-6">
@@ -570,11 +604,16 @@ function Preview({
           <div className="absolute left-[-10%] top-1/2 w-[120%] border-t border-foreground/30 -rotate-6" />
           {source ? (
             <video
-              key={selectedClip?.id}
+              ref={video}
+              key={source}
               className="absolute inset-0 size-full bg-black object-contain"
               controls
               preload="metadata"
               src={source}
+              onTimeUpdate={(event) => setPlayhead(event.currentTarget.currentTime * 1_000_000)}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => setPlaying(false)}
             >
               Your system cannot play this source format.
             </video>
@@ -598,7 +637,7 @@ function Preview({
           )}
           <div className="absolute bottom-3 left-4 right-4 flex justify-between font-mono text-[10px] text-muted-foreground">
             <span>{timecode(playhead)}</span>
-            <span>60 FPS</span>
+            <span>{rendering ? "Rendering preview…" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
           </div>
         </div>
       </div>
@@ -609,7 +648,7 @@ function Preview({
         <div className="flex items-center gap-1">
           <IconButton
             label="Previous second"
-            onClick={() => setPlayhead(Math.max(0, playhead - 1_000_000))}
+            onClick={() => seek(playhead - 1_000_000)}
           >
             <ChevronLeft />
           </IconButton>
@@ -623,9 +662,7 @@ function Preview({
           </Button>
           <IconButton
             label="Next second"
-            onClick={() =>
-              setPlayhead(Math.min(duration, playhead + 1_000_000))
-            }
+            onClick={() => seek(playhead + 1_000_000)}
           >
             <ChevronRight />
           </IconButton>
@@ -633,7 +670,15 @@ function Preview({
         <span className="font-mono text-xs text-muted-foreground">
           {timecode(duration)}
         </span>
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => setMode((current) => current === "timeline" ? "clip" : "timeline")}
+        >
+          {mode === "timeline" ? "Timeline" : "Clip"}
+        </Button>
       </div>
+      {error && <p className="px-3 pb-1 text-center text-[10px] text-destructive">{error}</p>}
     </section>
   );
 }

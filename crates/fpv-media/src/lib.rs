@@ -7,5 +7,7 @@ pub mod probe;
 pub mod process;
 
 pub use error::{MediaError, MediaResult};
-pub use export::{export_clip, export_clip_args, generate_proxy, ExportSettings};
+pub use export::{
+    export_clip, export_clip_args, export_timeline_preview, generate_proxy, ExportSettings,
+};
 pub use probe::{probe, MediaInfo};
