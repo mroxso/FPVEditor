@@ -13,7 +13,7 @@
   <a href="LICENSE">MIT License</a>
 </p>
 
-![FPV Editor project launcher](docs/images/editor-overview.png)
+![FPV Editor empty project workspace](docs/images/editor-overview.png)
 
 FPV Editor brings the FPV post-flight workflow into one native desktop application:
 import your flight footage, build a multi-track cut, tune stabilization, apply LUTs, and
