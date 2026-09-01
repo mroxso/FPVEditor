@@ -11,4 +11,4 @@ pub use export::{
     export_clip, export_clip_args, export_clip_preview, export_timeline_preview, generate_proxy,
     preview_dimensions, ExportSettings,
 };
-pub use probe::{probe, MediaInfo};
+pub use probe::{probe, probe_gyro_trace, GyroTrace, MediaInfo};

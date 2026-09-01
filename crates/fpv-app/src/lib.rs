@@ -134,6 +134,10 @@ impl AppState {
         fpv_media::probe(path).context("ffprobe failed")
     }
 
+    pub fn probe_gyro_trace(&self, path: &Path) -> Result<Option<fpv_media::GyroTrace>> {
+        fpv_media::probe_gyro_trace(path).context("could not read gyroscope metadata")
+    }
+
     /// Import files or recursively scan folders for video sources. This only
     /// reads metadata through ffprobe; originals (including network shares)
     /// remain in place and project clips reference their source paths.

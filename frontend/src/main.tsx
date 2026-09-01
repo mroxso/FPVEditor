@@ -106,13 +106,14 @@ type MediaImportOutcome = Outcome & {
   imported_paths: string[];
   skipped_paths: string[];
 };
+type GyroTrace = { samples: [number, number, number][] };
 type Provider = {
   base_url: string;
   api_key: string | null;
   model: string;
   extra_headers: Record<string, string>;
 };
-type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number; autoCheckUpdates: boolean };
+type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number; autoCheckUpdates: boolean; gyroOverlay: boolean };
 type RecentProject = { path: string; name: string; openedAt: number };
 type UpdateCheckResult = {
   current_version: string;
@@ -142,7 +143,7 @@ const workflowPhases: {
 ];
 const preferencesKey = "fpv-editor-preferences";
 const recentProjectsKey = "fpv-editor-recent-projects";
-const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220, autoCheckUpdates: true };
+const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220, autoCheckUpdates: true, gyroOverlay: false };
 const readLocal = <T,>(key: string, fallback: T): T => {
   try { return JSON.parse(localStorage.getItem(key) ?? "") as T; } catch { return fallback; }
 };
@@ -239,6 +240,7 @@ function App() {
   const [redoable, setRedoable] = useState(false);
   const [notice, setNotice] = useState("Ready to edit");
   const [dragActive, setDragActive] = useState(false);
+  const [gyroTraces, setGyroTraces] = useState<Record<string, GyroTrace | null>>({});
   const { copilotOpen, mediaOpen, inspectorOpen, timelineHeight } = preferences;
   const setPreference = <K extends keyof EditorPreferences>(key: K, value: EditorPreferences[K]) =>
     setPreferences((current) => ({ ...current, [key]: value }));
@@ -301,6 +303,18 @@ function App() {
     if (activePhase === "cut") setPreviewMode("timeline");
   }, [activePhase]);
   useEffect(() => { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); }, [preferences]);
+  useEffect(() => {
+    if (!preferences.gyroOverlay) return;
+    let cancelled = false;
+    const sourcePaths = [...new Set(Object.values(project.clips).map((clip) => clip.source_path))];
+    for (const path of sourcePaths) {
+      if (gyroTraces[path] !== undefined) continue;
+      void invoke<GyroTrace | null>("probe_gyro_trace", { path })
+        .then((trace) => { if (!cancelled) setGyroTraces((current) => ({ ...current, [path]: trace })); })
+        .catch(() => { if (!cancelled) setGyroTraces((current) => ({ ...current, [path]: null })); });
+    }
+    return () => { cancelled = true; };
+  }, [preferences.gyroOverlay, project, gyroTraces]);
   const checkForUpdates = useCallback(async (silent = false) => {
     setCheckingUpdate(true);
     try {
@@ -691,6 +705,8 @@ function App() {
           onTrimEnd={(clip, newOut) => command({ command: "trim_clip", clip_id: clip.id, new_in: clip.in_point, new_out: newOut })}
           onTrimStart={(clip, newIn, newPosition) => command({ command: "trim_clip_start", clip_id: clip.id, new_in: newIn, new_position: newPosition })}
           onAddTrack={addTrack}
+          gyroOverlay={preferences.gyroOverlay}
+          gyroTraces={gyroTraces}
           height={timelineHeight}
           setHeight={(height) => setPreference("timelineHeight", height)}
         />}
@@ -704,6 +720,8 @@ function App() {
           appVersion={appVersion}
           autoCheckUpdates={preferences.autoCheckUpdates}
           setAutoCheckUpdates={(value) => setPreference("autoCheckUpdates", value)}
+          gyroOverlay={preferences.gyroOverlay}
+          setGyroOverlay={(value) => setPreference("gyroOverlay", value)}
           updateCheck={updateCheck}
           checkingUpdate={checkingUpdate}
           downloadingUpdate={downloadingUpdate}
@@ -1209,6 +1227,8 @@ function Timeline({
   onTrimStart,
   onTrimEnd,
   onAddTrack,
+  gyroOverlay,
+  gyroTraces,
   height,
   setHeight,
 }: {
@@ -1227,6 +1247,8 @@ function Timeline({
   onTrimStart: (clip: Clip, newIn: number, newPosition: number) => Promise<Outcome | undefined>;
   onTrimEnd: (clip: Clip, newOut: number) => Promise<Outcome | undefined>;
   onAddTrack: (kind: TrackKind) => Promise<Outcome | undefined>;
+  gyroOverlay: boolean;
+  gyroTraces: Record<string, GyroTrace | null>;
   height: number;
   setHeight: (height: number) => void;
 }) {
@@ -1413,7 +1435,7 @@ function Timeline({
           <div
             key={track.id}
             data-track-id={track.id}
-            className="grid h-16 grid-cols-[148px_1fr] border-b"
+            className="grid h-20 grid-cols-[148px_1fr] border-b"
           >
             <div className="border-r px-4 py-3">
               <p className="font-mono text-xs">{track.name}</p>
@@ -1452,6 +1474,7 @@ function Timeline({
                     className={`timeline-clip ${selected === id ? "is-selected" : ""} ${draggingClip?.id === id ? "is-moving" : ""} ${tool === "razor" ? "is-razor" : ""}`}
                     style={{ left: `${left}%`, width: `${width}%` }}
                   >
+                    {gyroOverlay && gyroTraces[clip.source_path] && <GyroGraph trace={gyroTraces[clip.source_path]!} />}
                     {selected === id && tool === "select" && <>
                       <span className="timeline-trim-handle timeline-trim-start" role="button" aria-label="Trim clip start" onPointerDown={(event) => trimClip(event, clip, "start")} />
                       <span className="timeline-trim-handle timeline-trim-end" role="button" aria-label="Trim clip end" onPointerDown={(event) => trimClip(event, clip, "end")} />
@@ -1483,6 +1506,26 @@ function Timeline({
     </section>
   );
 }
+function GyroGraph({ trace }: { trace: GyroTrace }) {
+  if (trace.samples.length < 2) return null;
+  const magnitude = Math.max(0.001, ...trace.samples.flatMap((sample) => sample.map(Math.abs)));
+  const points = (axis: number) => trace.samples.map((sample, index) => {
+    const x = (index / (trace.samples.length - 1)) * 100;
+    const y = 50 - (sample[axis] / magnitude) * 43;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
+  return (
+    <span className="gyro-graph" role="img" aria-label="Gyroscope activity: X, Y, and Z axes">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1="50" x2="100" y2="50" className="gyro-zero-line" />
+        <polyline points={points(0)} className="gyro-axis gyro-axis-x" />
+        <polyline points={points(1)} className="gyro-axis gyro-axis-y" />
+        <polyline points={points(2)} className="gyro-axis gyro-axis-z" />
+      </svg>
+      <span className="gyro-legend" aria-hidden="true"><i className="gyro-axis-x" />X<i className="gyro-axis-y" />Y<i className="gyro-axis-z" />Z</span>
+    </span>
+  );
+}
 function SettingsDialog({
   open,
   setOpen,
@@ -1493,6 +1536,8 @@ function SettingsDialog({
   appVersion,
   autoCheckUpdates,
   setAutoCheckUpdates,
+  gyroOverlay,
+  setGyroOverlay,
   updateCheck,
   checkingUpdate,
   downloadingUpdate,
@@ -1508,6 +1553,8 @@ function SettingsDialog({
   appVersion: string;
   autoCheckUpdates: boolean;
   setAutoCheckUpdates: (value: boolean) => void;
+  gyroOverlay: boolean;
+  setGyroOverlay: (value: boolean) => void;
   updateCheck?: UpdateCheckResult;
   checkingUpdate: boolean;
   downloadingUpdate: boolean;
@@ -1544,6 +1591,15 @@ function SettingsDialog({
                 <CardTitle className="text-sm">Current project</CardTitle>
                 <CardDescription className="font-mono text-xs">{project.width} × {project.height} · {project.fps} FPS · {Object.keys(project.clips).length} clips</CardDescription>
               </CardHeader>
+            </Card>
+            <Card size="sm" className="shadow-none">
+              <CardContent className="flex items-center justify-between gap-4 py-4">
+                <div>
+                  <p className="text-xs font-medium">Timeline gyroscope overlay</p>
+                  <p className="mt-1 text-[10px] leading-4 text-muted-foreground">Show subtle X, Y, and Z motion traces above clips with readable GoPro gyro metadata.</p>
+                </div>
+                <Switch checked={gyroOverlay} onCheckedChange={setGyroOverlay} aria-label="Show timeline gyroscope overlay" />
+              </CardContent>
             </Card>
           </TabsContent>
           <TabsContent value="ai" className="mt-4 space-y-3">
