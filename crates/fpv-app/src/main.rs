@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
 use fpv_ai::ProviderConfig;
-use fpv_app::{AppState, ExecuteOutcome, MediaImportOutcome};
+use fpv_app::{AppState, ExecuteOutcome, MediaImportOutcome, UpdateCheckResult};
 use fpv_core::{Command, Project};
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 type AppResult<T> = Result<T, String>;
 
@@ -109,9 +110,32 @@ async fn chat(state: State<'_, AppState>, prompt: String) -> AppResult<String> {
     app_error(state.chat(&prompt).await)
 }
 
+#[tauri::command]
+async fn check_for_updates(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<UpdateCheckResult> {
+    let current_version = app.package_info().version.to_string();
+    app_error(state.check_for_updates(&current_version).await)
+}
+
+#[tauri::command]
+async fn download_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    download_url: String,
+    asset_name: String,
+) -> AppResult<()> {
+    let path = app_error(state.download_update(&download_url, &asset_name).await)?;
+    app.opener()
+        .open_path(path.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             timeline,
@@ -126,7 +150,9 @@ fn main() {
             render_preview,
             configure_ai,
             test_ai_connection,
-            chat
+            chat,
+            check_for_updates,
+            download_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running FPV Editor");
