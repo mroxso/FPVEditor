@@ -27,4 +27,4 @@ fi
 
 echo
 echo "macOS app: $repo_root/$app_path"
-find target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print 2>/dev/null || true
+# find target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print 2>/dev/null || true
