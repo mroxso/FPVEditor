@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/mroxso/FPVEditor/compare/v0.3.0...v0.4.0) (2026-09-01)
+
+
+### Features
+
+* **app:** check for updates via GitHub Releases ([#7](https://github.com/mroxso/FPVEditor/issues/7)) ([d119c1f](https://github.com/mroxso/FPVEditor/commit/d119c1fa1f6f2ca346a555b095fe8ee9c58c2a10))
+
+
+### Bug Fixes
+
+* General fixes ([#8](https://github.com/mroxso/FPVEditor/issues/8)) ([d9cb53e](https://github.com/mroxso/FPVEditor/commit/d9cb53ea04ce54f977ee80b09ce38082b052d6a9))
+* only publish built installers as release assets ([425b8b9](https://github.com/mroxso/FPVEditor/commit/425b8b9590b385900f32c836bae984cf9c3e2f4c))
+
 ## [0.3.0](https://github.com/mroxso/FPVEditor/compare/v0.2.0...v0.3.0) (2026-09-01)
 
 
