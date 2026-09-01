@@ -64,10 +64,8 @@ jobs:
         with:
           name: ${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/bundle/**/*.dmg
-            target/${{ matrix.target }}/release/bundle/**/*.msi
-            target/${{ matrix.target }}/release/bundle/**/*.AppImage
-            target/${{ matrix.target }}/release/bundle/**/*.deb
+            target/**/bundle/**/*
+            crates/fpv-app/target/**/bundle/**/*
           if-no-files-found: error
 
   release:
