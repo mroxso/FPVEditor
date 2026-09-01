@@ -27,7 +27,7 @@ Place Rust unit tests beside implementation code in `#[cfg(test)]` modules. Put 
 
 ## Commit & Pull Request Guidelines
 
-Recent commits use short, imperative subjects such as `Implement Tauri FPV editor frontend` and `Fix stabilization ... bugs`. Keep each commit scoped to one coherent change. Pull requests should explain the behavior change, list verification commands, link relevant issues or `PLAN.md` sections, and include screenshots for visible UI changes. Call out dependencies on FFmpeg, GPU hardware, API providers, or project-file compatibility.
+Use Conventional Commits for every new commit: `feat:` for user-visible features, `fix:` for bug fixes, and suitable types such as `docs:`, `test:`, `ci:`, `build:`, `refactor:`, or `chore:` for other work. Use `!` or a `BREAKING CHANGE:` footer for incompatible changes. Keep each commit scoped to one coherent change. Pull requests should explain the behavior change, list verification commands, link relevant issues or `PLAN.md` sections, and include screenshots for visible UI changes. Call out dependencies on FFmpeg, GPU hardware, API providers, or project-file compatibility.
 
 ## Security & Configuration
 
