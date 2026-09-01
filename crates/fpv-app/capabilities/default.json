@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Default capabilities for the FPV Editor desktop window.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save"]
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "opener:allow-open-path"
+  ]
 }

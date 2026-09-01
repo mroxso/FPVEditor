@@ -13,6 +13,8 @@
 //! running the GUI and `mcp-serve` against the same project file
 //! concurrently can silently overwrite one side's edits on save.
 
+mod updates;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,6 +24,8 @@ use fpv_ai::{AiClient, ProviderConfig};
 use fpv_core::{Command, CommandBus, NewClip, Project, Timecode, TrackKind};
 use serde::Serialize;
 use tokio::sync::{Mutex, Semaphore};
+
+pub use updates::UpdateCheckResult;
 
 pub struct AppState {
     bus: Arc<Mutex<CommandBus>>,
@@ -305,6 +309,17 @@ impl AppState {
         let mut bus = self.bus.lock().await;
         let reply = fpv_ai::run_turn(&client, &mut bus, prompt).await?;
         Ok(reply)
+    }
+
+    /// Check GitHub Releases for a build newer than `current_version`.
+    pub async fn check_for_updates(&self, current_version: &str) -> Result<UpdateCheckResult> {
+        updates::check_for_updates(current_version).await
+    }
+
+    /// Download an update asset (as surfaced by `check_for_updates`) to a
+    /// temp file and return its path for the caller to hand to the OS opener.
+    pub async fn download_update(&self, download_url: &str, asset_name: &str) -> Result<PathBuf> {
+        updates::download_update(download_url, asset_name).await
     }
 }
 

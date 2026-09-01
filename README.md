@@ -19,7 +19,7 @@ available in the environment, but both are exercised for real in this repo's dev
 | `fpv-ai` | ✅ | Configurable OpenAI-compatible client (`async-openai`), the shared tool catalog (PLAN.md §4.2), and the tool-calling agent loop — tested against a local mock HTTP server, no network/API key needed |
 | `fpv-mcp` | ✅ | A real MCP server (`rmcp`) exposing the same tool catalog to external agents (e.g. Claude Code) over stdio; tested with a real MCP client round-tripping over an in-memory pipe |
 | `fpv-cli` | ✅ | Headless `fpv` binary: `new/add-track/add-clip/trim-clip/split-clip/stabilize/apply-lut/list/show/probe/export/mcp-serve`, tested by driving the built binary as a subprocess |
-| `fpv-app` | ✅ | Tauri 2 desktop shell plus a React/Vite flight-deck interface. The UI drives the same `AppState` command bus through typed IPC for timeline edits, undo/redo, project open/save, AI-provider configuration, connection tests, and chat. |
+| `fpv-app` | ✅ | Tauri 2 desktop shell plus a React/Vite flight-deck interface. The UI drives the same `AppState` command bus through typed IPC for timeline edits, undo/redo, project open/save, AI-provider configuration, connection tests, chat, and checking/downloading app updates from GitHub Releases. |
 
 Everything one layer below the GUI — the command bus, undo/redo, stabilization math,
 media pipeline, LUT/color GPU path, and both the internal-agent and external-agent (MCP)

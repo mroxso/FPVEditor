@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
@@ -21,6 +22,7 @@ import {
   Pause,
   Play,
   Plus,
+  RefreshCw,
   RotateCw,
   Scissors,
   Send,
@@ -108,8 +110,18 @@ type Provider = {
   model: string;
   extra_headers: Record<string, string>;
 };
-type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number };
+type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number; autoCheckUpdates: boolean };
 type RecentProject = { path: string; name: string; openedAt: number };
+type UpdateCheckResult = {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_url: string;
+  release_notes: string | null;
+  published_at: string | null;
+  download_url: string | null;
+  asset_name: string | null;
+};
 type WorkflowPhase = "import" | "stabilize" | "cut" | "grade" | "export";
 const workflowPhases: {
   id: WorkflowPhase;
@@ -126,7 +138,7 @@ const workflowPhases: {
 ];
 const preferencesKey = "fpv-editor-preferences";
 const recentProjectsKey = "fpv-editor-recent-projects";
-const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220 };
+const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220, autoCheckUpdates: true };
 const readLocal = <T,>(key: string, fallback: T): T => {
   try { return JSON.parse(localStorage.getItem(key) ?? "") as T; } catch { return fallback; }
 };
@@ -206,7 +218,10 @@ function ProjectLauncher({
 
 function App() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [preferences, setPreferences] = useState<EditorPreferences>(() => readLocal(preferencesKey, defaultPreferences));
+  const [preferences, setPreferences] = useState<EditorPreferences>(() => ({
+    ...defaultPreferences,
+    ...readLocal(preferencesKey, defaultPreferences),
+  }));
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => readLocal(recentProjectsKey, [] as RecentProject[]));
   const [project, setProject] = useState<Project>(seedProject);
   const [selected, setSelected] = useState<string>();
@@ -222,6 +237,10 @@ function App() {
     setPreferences((current) => ({ ...current, [key]: value }));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [provider, setProvider] = useState(defaultProvider);
+  const [appVersion, setAppVersion] = useState("");
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult>();
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [downloadingUpdate, setDownloadingUpdate] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState([
     {
@@ -269,8 +288,50 @@ function App() {
   };
   useEffect(() => {
     void refresh();
+    void getVersion().then(setAppVersion).catch(() => undefined);
   }, []);
   useEffect(() => { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); }, [preferences]);
+  const checkForUpdates = useCallback(async (silent = false) => {
+    setCheckingUpdate(true);
+    try {
+      const result = await invoke<UpdateCheckResult>("check_for_updates");
+      setUpdateCheck(result);
+      if (!silent) {
+        setNotice(
+          result.update_available
+            ? `Update available: v${result.latest_version}`
+            : "You're up to date",
+        );
+      } else if (result.update_available) {
+        setNotice(`Update available: v${result.latest_version} — see Settings`);
+      }
+    } catch (error) {
+      if (!silent) setNotice(`Update check failed: ${String(error)}`);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (preferences.autoCheckUpdates) void checkForUpdates(true);
+    // Only ever auto-check once per launch; the user can re-check manually afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const downloadUpdate = async () => {
+    if (!updateCheck?.download_url || !updateCheck.asset_name) return;
+    setDownloadingUpdate(true);
+    try {
+      setNotice(`Downloading ${updateCheck.asset_name}…`);
+      await invoke("download_update", {
+        downloadUrl: updateCheck.download_url,
+        assetName: updateCheck.asset_name,
+      });
+      setNotice("Update downloaded — follow the installer to finish");
+    } catch (error) {
+      setNotice(`Update download failed: ${String(error)}`);
+    } finally {
+      setDownloadingUpdate(false);
+    }
+  };
   const rememberProject = (path: string, name: string) => {
     setRecentProjects((current) => {
       const next = [{ path, name, openedAt: Date.now() }, ...current.filter((item) => item.path !== path)].slice(0, 8);
@@ -457,8 +518,11 @@ function App() {
               <Download data-icon="inline-start" />
               Save
             </Button>
-            <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
+            <IconButton label="Settings" onClick={() => setSettingsOpen(true)} className="relative">
               <Settings />
+              {updateCheck?.update_available && (
+                <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
+              )}
             </IconButton>
           </div>
         </header>
@@ -556,6 +620,14 @@ function App() {
           project={project}
           setProvider={setProvider}
           saveProvider={saveProvider}
+          appVersion={appVersion}
+          autoCheckUpdates={preferences.autoCheckUpdates}
+          setAutoCheckUpdates={(value) => setPreference("autoCheckUpdates", value)}
+          updateCheck={updateCheck}
+          checkingUpdate={checkingUpdate}
+          downloadingUpdate={downloadingUpdate}
+          checkForUpdates={() => checkForUpdates(false)}
+          downloadUpdate={downloadUpdate}
         />
         {dragActive && (
           <div className="pointer-events-none absolute inset-3 grid place-items-center rounded-xl border-2 border-dashed bg-background/90">
@@ -1137,6 +1209,14 @@ function SettingsDialog({
   project,
   setProvider,
   saveProvider,
+  appVersion,
+  autoCheckUpdates,
+  setAutoCheckUpdates,
+  updateCheck,
+  checkingUpdate,
+  downloadingUpdate,
+  checkForUpdates,
+  downloadUpdate,
 }: {
   open: boolean;
   setOpen: (value: boolean) => void;
@@ -1144,6 +1224,14 @@ function SettingsDialog({
   project: Project;
   setProvider: (value: Provider) => void;
   saveProvider: (test?: boolean) => Promise<void>;
+  appVersion: string;
+  autoCheckUpdates: boolean;
+  setAutoCheckUpdates: (value: boolean) => void;
+  updateCheck?: UpdateCheckResult;
+  checkingUpdate: boolean;
+  downloadingUpdate: boolean;
+  checkForUpdates: () => Promise<void>;
+  downloadUpdate: () => Promise<void>;
 }) {
   const set = (key: keyof Provider, value: string | null) =>
     setProvider({ ...provider, [key]: value });
@@ -1160,6 +1248,7 @@ function SettingsDialog({
           <TabsList className="w-full">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="ai">AI</TabsTrigger>
+            <TabsTrigger value="updates">Updates</TabsTrigger>
             <TabsTrigger value="info">Info</TabsTrigger>
           </TabsList>
           <TabsContent value="general" className="mt-4 space-y-3">
@@ -1190,13 +1279,74 @@ function SettingsDialog({
               <Input id="provider-api-key" type="password" value={provider.api_key ?? ""} onChange={(event) => set("api_key", event.target.value || null)} placeholder="sk-…" />
             </div>
           </TabsContent>
+          <TabsContent value="updates" className="mt-4 space-y-3">
+            <Card size="sm" className="shadow-none">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-sm">Software update</CardTitle>
+                    <CardDescription className="font-mono text-xs">
+                      Current version {appVersion ? `v${appVersion}` : "…"}
+                    </CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" disabled={checkingUpdate} onClick={() => void checkForUpdates()}>
+                    <RefreshCw data-icon="inline-start" className={checkingUpdate ? "animate-spin" : ""} />
+                    {checkingUpdate ? "Checking…" : "Check for updates"}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-0">
+                {updateCheck && (
+                  <div className="rounded-lg border p-3 text-xs">
+                    {updateCheck.update_available ? (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <p className="font-medium">Update available: v{updateCheck.latest_version}</p>
+                          <Badge variant="secondary">New</Badge>
+                        </div>
+                        {updateCheck.release_notes && (
+                          <p className="mt-2 line-clamp-4 whitespace-pre-line leading-5 text-muted-foreground">
+                            {updateCheck.release_notes}
+                          </p>
+                        )}
+                        <div className="mt-3 flex gap-2">
+                          <Button
+                            size="sm"
+                            disabled={downloadingUpdate || !updateCheck.download_url}
+                            onClick={() => void downloadUpdate()}
+                          >
+                            <Download data-icon="inline-start" />
+                            {downloadingUpdate ? "Downloading…" : "Download & install"}
+                          </Button>
+                        </div>
+                        {!updateCheck.download_url && (
+                          <p className="mt-2 text-[10px] text-muted-foreground">
+                            No installer for this platform was found in the release; open the release page instead.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground">You're up to date.</p>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium">Check automatically</p>
+                    <p className="text-[10px] text-muted-foreground">Looks for a new release once when the app starts.</p>
+                  </div>
+                  <Switch checked={autoCheckUpdates} onCheckedChange={setAutoCheckUpdates} />
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
           <TabsContent value="info" className="mt-4">
             <Card size="sm" className="shadow-none">
               <CardHeader className="flex-row items-start gap-3 space-y-0">
                 <div className="grid size-8 place-items-center rounded-md bg-secondary"><Info className="size-4" /></div>
                 <div>
                   <CardTitle className="text-sm">FPV Editor</CardTitle>
-                  <CardDescription className="mt-1 text-xs">Version 0.1.0 · Desktop cut suite</CardDescription>
+                  <CardDescription className="mt-1 text-xs">Version {appVersion || "0.3.0"} · Desktop cut suite</CardDescription>
                 </div>
               </CardHeader>
               <CardContent className="pt-0 text-xs leading-5 text-muted-foreground">Built with Tauri, Rust, React, and FFmpeg. Original media remains linked in place.</CardContent>
