@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/mroxso/FPVEditor/compare/v0.4.1...v0.5.0) (2026-09-01)
+
+
+### Features
+
+* add FPV Editor brand assets ([#10](https://github.com/mroxso/FPVEditor/issues/10)) ([72ca7d8](https://github.com/mroxso/FPVEditor/commit/72ca7d8e0f362501a4727140f9a5aefa9ec98179))
+
 ## [0.4.1](https://github.com/mroxso/FPVEditor/compare/v0.4.0...v0.4.1) (2026-09-01)
 
 
