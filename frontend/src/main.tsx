@@ -12,6 +12,7 @@ import {
   Clapperboard,
   Command,
   Download,
+  Film,
   FolderInput,
   FolderOpen,
   GripHorizontal,
@@ -21,8 +22,10 @@ import {
   Play,
   Plus,
   RotateCw,
+  Scissors,
   Send,
   Settings,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Undo2,
@@ -107,6 +110,20 @@ type Provider = {
 };
 type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number };
 type RecentProject = { path: string; name: string; openedAt: number };
+type WorkflowPhase = "import" | "stabilize" | "cut" | "grade" | "export";
+const workflowPhases: {
+  id: WorkflowPhase;
+  label: string;
+  eyebrow: string;
+  description: string;
+  icon: typeof FolderInput;
+}[] = [
+  { id: "import", label: "Import", eyebrow: "01 · Medien", description: "Quellen verknüpfen und die besten Takes wählen.", icon: FolderInput },
+  { id: "stabilize", label: "Stabilisieren", eyebrow: "02 · Motion", description: "Horizon lock und Bewegung pro Take abstimmen.", icon: SlidersHorizontal },
+  { id: "cut", label: "Schnitt", eyebrow: "03 · Timeline", description: "Momente ordnen, trimmen und den Rhythmus setzen.", icon: Scissors },
+  { id: "grade", label: "Look", eyebrow: "04 · Farbe", description: "LUTs, Filter und den finalen Bildlook festlegen.", icon: Film },
+  { id: "export", label: "Export", eyebrow: "05 · Ausgabe", description: "Timeline prüfen und den finalen Flight Cut ausgeben.", icon: Download },
+];
 const preferencesKey = "fpv-editor-preferences";
 const recentProjectsKey = "fpv-editor-recent-projects";
 const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220 };
@@ -195,6 +212,7 @@ function App() {
   const [selected, setSelected] = useState<string>();
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [activePhase, setActivePhase] = useState<WorkflowPhase>("import");
   const [undoable, setUndoable] = useState(false);
   const [redoable, setRedoable] = useState(false);
   const [notice, setNotice] = useState("Ready to edit");
@@ -212,6 +230,8 @@ function App() {
     },
   ]);
   const selectedClip = selected ? project.clips[selected] : undefined;
+  const activePhaseIndex = workflowPhases.findIndex((phase) => phase.id === activePhase);
+  const activeWorkflowPhase = workflowPhases[activePhaseIndex];
   const duration = useMemo(
     () =>
       Math.max(
@@ -431,42 +451,42 @@ function App() {
             </IconButton>
           </div>
         </header>
-        <nav className="flex h-11 items-center gap-2 border-b px-4">
-          <Button size="sm" onClick={() => void importMedia()}>
-            <Plus data-icon="inline-start" />
-            Import media
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => void importFolder()}>
-            <FolderInput data-icon="inline-start" />
-            Import folder
-          </Button>
-          <Separator orientation="vertical" className="mx-1 h-4" />
-          <IconButton
-            label="Undo"
-            disabled={!undoable}
-            onClick={() => invoke<Outcome>("undo").then(apply)}
-          >
-            <Undo2 />
-          </IconButton>
-          <IconButton
-            label="Redo"
-            disabled={!redoable}
-            onClick={() => invoke<Outcome>("redo").then(apply)}
-          >
-            <RotateCw />
-          </IconButton>
-          <p className="ml-2 flex-1 truncate text-xs text-muted-foreground">
-            {notice}
-          </p>
-          <Button
-            variant={copilotOpen ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setPreference("copilotOpen", !copilotOpen)}
-          >
-            <Sparkles data-icon="inline-start" />
-            Copilot
-          </Button>
+        <nav className="workflow-bar border-b" aria-label="Editing workflow">
+          <div className="workflow-phases" role="tablist" aria-label="Editing phases">
+            {workflowPhases.map((phase, index) => {
+              const Icon = phase.icon;
+              const isActive = phase.id === activePhase;
+              return (
+                <button
+                  key={phase.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  className={`workflow-phase ${isActive ? "is-active" : ""} ${index < activePhaseIndex ? "is-complete" : ""}`}
+                  onClick={() => setActivePhase(phase.id)}
+                >
+                  <span className="workflow-phase-number">{String(index + 1).padStart(2, "0")}</span>
+                  <Icon />
+                  <span>{phase.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="workflow-context" role="status">
+            <span className="font-mono text-[10px] uppercase tracking-[.14em] text-muted-foreground">{activeWorkflowPhase.eyebrow}</span>
+            <span className="workflow-description">{activeWorkflowPhase.description}</span>
+          </div>
+          <div className="workflow-actions">
+            {activePhase === "import" && <>
+              <Button size="sm" onClick={() => void importMedia()}><Plus data-icon="inline-start" />Medien wählen</Button>
+              <Button variant="outline" size="sm" onClick={() => void importFolder()}><FolderInput data-icon="inline-start" />Ordner</Button>
+            </>}
+            <IconButton label="Undo" disabled={!undoable} onClick={() => invoke<Outcome>("undo").then(apply)}><Undo2 /></IconButton>
+            <IconButton label="Redo" disabled={!redoable} onClick={() => invoke<Outcome>("redo").then(apply)}><RotateCw /></IconButton>
+            <Button variant={copilotOpen ? "secondary" : "ghost"} size="sm" onClick={() => setPreference("copilotOpen", !copilotOpen)}><Sparkles data-icon="inline-start" />Copilot</Button>
+          </div>
         </nav>
+        <div className="workflow-notice border-b"><p className="truncate text-xs text-muted-foreground">{notice}</p></div>
         <section
           className="grid min-h-0"
           style={{
@@ -476,7 +496,7 @@ function App() {
               inspectorOpen ? "270px" : "42px",
               ...(copilotOpen ? ["310px"] : []),
             ].join(" "),
-            height: `calc(100vh - ${timelineHeight + 95}px)`,
+            height: `calc(100vh - ${timelineHeight + 152}px)`,
           }}
         >
           <aside className="border-r bg-card">
