@@ -131,10 +131,15 @@ impl AppState {
 
         let mut readable = Vec::new();
         let mut skipped_paths = Vec::new();
+        let mut probe_errors = Vec::new();
         for path in candidates {
             match fpv_media::probe(&path) {
                 Ok(info) if info.duration_us > 0 => readable.push((path, info.duration_us)),
-                _ => skipped_paths.push(path),
+                Ok(_) => skipped_paths.push(path),
+                Err(error) => {
+                    probe_errors.push(format!("{}: {error}", path.display()));
+                    skipped_paths.push(path);
+                }
             }
         }
 
@@ -154,7 +159,8 @@ impl AppState {
             }
         });
         if readable.is_empty() {
-            anyhow::bail!("no readable video files could be imported; ensure ffprobe is installed and the source is available")
+            let detail = probe_errors.first().map(String::as_str).unwrap_or("no usable video stream found");
+            anyhow::bail!("no readable video files could be imported ({detail})")
         }
 
         let video_track = match bus
