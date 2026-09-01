@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use fpv_ai::ProviderConfig;
-use fpv_app::{AppState, ExecuteOutcome};
+use fpv_app::{AppState, ExecuteOutcome, MediaImportOutcome};
 use fpv_core::{Command, Project};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 type AppResult<T> = Result<T, String>;
 
@@ -32,8 +32,18 @@ async fn redo(state: State<'_, AppState>) -> AppResult<ExecuteOutcome> {
 }
 
 #[tauri::command]
-async fn load_project(state: State<'_, AppState>, path: String) -> AppResult<Project> {
-    app_error(state.load_project(&PathBuf::from(path)).await)
+async fn load_project(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<Project> {
+    let project = app_error(state.load_project(&PathBuf::from(path)).await)?;
+    for clip in project.clips.values() {
+        app.asset_protocol_scope()
+            .allow_file(&clip.source_path)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(project)
 }
 
 #[tauri::command]
@@ -44,6 +54,25 @@ async fn save_project(state: State<'_, AppState>, path: String) -> AppResult<()>
 #[tauri::command]
 fn probe_media(state: State<'_, AppState>, path: String) -> AppResult<fpv_media::MediaInfo> {
     app_error(state.probe_media(&PathBuf::from(path)))
+}
+
+#[tauri::command]
+async fn import_media(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> AppResult<MediaImportOutcome> {
+    let outcome = app_error(
+        state
+            .import_media_paths(paths.into_iter().map(PathBuf::from).collect())
+            .await,
+    )?;
+    for path in &outcome.imported_paths {
+        app.asset_protocol_scope()
+            .allow_file(path)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(outcome)
 }
 
 #[tauri::command]
@@ -74,6 +103,7 @@ fn main() {
             load_project,
             save_project,
             probe_media,
+            import_media,
             configure_ai,
             test_ai_connection,
             chat

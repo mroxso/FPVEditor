@@ -13,12 +13,13 @@
 //! running the GUI and `mcp-serve` against the same project file
 //! concurrently can silently overwrite one side's edits on save.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use fpv_ai::{AiClient, ProviderConfig};
-use fpv_core::{Command, CommandBus, Project};
+use fpv_core::{Command, CommandBus, NewClip, Project, Timecode, TrackKind};
 use serde::Serialize;
 use tokio::sync::Mutex;
 
@@ -37,6 +38,17 @@ impl Default for AppState {
 #[derive(Debug, Serialize)]
 pub struct ExecuteOutcome {
     pub project: Project,
+    pub can_undo: bool,
+    pub can_redo: bool,
+}
+
+/// Result of importing source media. Files are never copied: every added
+/// `Clip` retains the absolute path that was selected or discovered.
+#[derive(Debug, Serialize)]
+pub struct MediaImportOutcome {
+    pub project: Project,
+    pub imported_paths: Vec<PathBuf>,
+    pub skipped_paths: Vec<PathBuf>,
     pub can_undo: bool,
     pub can_redo: bool,
 }
@@ -108,6 +120,83 @@ impl AppState {
         fpv_media::probe(path).context("ffprobe failed")
     }
 
+    /// Import files or recursively scan folders for video sources. This only
+    /// reads metadata through ffprobe; originals (including network shares)
+    /// remain in place and project clips reference their source paths.
+    pub async fn import_media_paths(&self, paths: Vec<PathBuf>) -> Result<MediaImportOutcome> {
+        let candidates = collect_media_files(&paths)?;
+        if candidates.is_empty() {
+            anyhow::bail!("no supported video files were found")
+        }
+
+        let mut readable = Vec::new();
+        let mut skipped_paths = Vec::new();
+        for path in candidates {
+            match fpv_media::probe(&path) {
+                Ok(info) if info.duration_us > 0 => readable.push((path, info.duration_us)),
+                _ => skipped_paths.push(path),
+            }
+        }
+
+        let mut bus = self.bus.lock().await;
+        let existing_sources: std::collections::HashSet<PathBuf> = bus
+            .project()
+            .clips
+            .values()
+            .map(|clip| clip.source_path.clone())
+            .collect();
+        readable.retain(|(path, _)| {
+            if existing_sources.contains(path) {
+                skipped_paths.push(path.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if readable.is_empty() {
+            anyhow::bail!("no readable video files could be imported; ensure ffprobe is installed and the source is available")
+        }
+
+        let video_track = match bus
+            .project()
+            .tracks
+            .iter()
+            .find(|track| track.kind == TrackKind::Video)
+        {
+            Some(track) => track.id,
+            None => {
+                bus.execute(Command::AddTrack {
+                    kind: TrackKind::Video,
+                    name: "V1".into(),
+                })?;
+                bus.project().tracks.last().expect("new track exists").id
+            }
+        };
+
+        let mut imported_paths = Vec::new();
+        let mut next_position = bus.project().duration();
+        for (path, duration_us) in readable {
+            bus.execute(Command::AddClip {
+                track_id: video_track,
+                clip: NewClip {
+                    source_path: path.clone(),
+                    in_point: Timecode::ZERO,
+                    out_point: Timecode(duration_us),
+                    position: next_position,
+                },
+            })?;
+            next_position = Timecode(next_position.0 + duration_us);
+            imported_paths.push(path);
+        }
+        Ok(MediaImportOutcome {
+            project: bus.project().clone(),
+            imported_paths,
+            skipped_paths,
+            can_undo: bus.can_undo(),
+            can_redo: bus.can_redo(),
+        })
+    }
+
     pub fn export_clip(
         &self,
         clip: &fpv_core::Clip,
@@ -149,12 +238,113 @@ impl AppState {
     }
 }
 
+const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "mkv", "m4v", "avi", "webm", "mts", "m2ts"];
+
+fn collect_media_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for path in paths {
+        collect_media_path(path, &mut files)?;
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn collect_media_path(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("cannot access media source at {}", path.display()))?;
+    if metadata.is_file() {
+        if is_supported_video(path) {
+            files.push(path.to_path_buf());
+        }
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)
+            .with_context(|| format!("cannot read media folder at {}", path.display()))?
+        {
+            collect_media_path(&entry?.path(), files)?;
+        }
+    }
+    Ok(())
+}
+
+fn is_supported_video(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            VIDEO_EXTENSIONS
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use fpv_core::TrackKind;
     use wiremock::matchers::{method, path as wpath};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn media_collection_recurses_and_keeps_only_supported_video_paths() {
+        let root =
+            std::env::temp_dir().join(format!("fpv-media-collection-{}", std::process::id()));
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let source = root.join("flight.MP4");
+        let nested_source = nested.join("goggles.mov");
+        std::fs::write(&source, []).unwrap();
+        std::fs::write(&nested_source, []).unwrap();
+        std::fs::write(root.join("notes.txt"), []).unwrap();
+
+        let found = collect_media_files(&[root.clone()]).unwrap();
+
+        assert_eq!(found, vec![source, nested_source]);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn media_import_links_the_original_source_path_without_copying_it() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping: ffmpeg is not available on PATH");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("fpv-app-import-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("network-source.mp4");
+        let generated = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=160x120:rate=24:duration=1",
+                "-pix_fmt",
+                "yuv420p",
+                source.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(generated.status.success());
+
+        let outcome = AppState::default()
+            .import_media_paths(vec![source.clone()])
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.imported_paths, vec![source.clone()]);
+        assert_eq!(outcome.project.clips.len(), 1);
+        assert_eq!(
+            outcome.project.clips.values().next().unwrap().source_path,
+            source
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
 
     #[tokio::test]
     async fn execute_command_mutates_shared_state_visible_to_get_timeline_state() {

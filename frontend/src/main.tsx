@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   ChevronLeft,
@@ -9,6 +10,7 @@ import {
   Clapperboard,
   Command,
   Download,
+  FolderInput,
   FolderOpen,
   Layers2,
   Pause,
@@ -20,6 +22,7 @@ import {
   Sparkles,
   Trash2,
   Undo2,
+  Upload,
   Video,
   WandSparkles,
   X,
@@ -87,13 +90,9 @@ type Project = {
   clips: Record<string, Clip>;
 };
 type Outcome = { project: Project; can_undo: boolean; can_redo: boolean };
-type MediaInfo = {
-  duration_us: number;
-  width: number;
-  height: number;
-  fps: number;
-  video_codec: string;
-  has_audio: boolean;
+type MediaImportOutcome = Outcome & {
+  imported_paths: string[];
+  skipped_paths: string[];
 };
 type Provider = {
   base_url: string;
@@ -118,6 +117,13 @@ const defaultProvider: Provider = {
 const timecode = (us: number) =>
   `${Math.floor(us / 60_000_000)}:${String(Math.floor(us / 1_000_000) % 60).padStart(2, "0")}`;
 const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
+const mediaSource = (path: string) => {
+  try {
+    return convertFileSrc(path);
+  } catch {
+    return undefined;
+  }
+};
 
 function IconButton({
   label,
@@ -144,6 +150,7 @@ function App() {
   const [undoable, setUndoable] = useState(false);
   const [redoable, setRedoable] = useState(false);
   const [notice, setNotice] = useState("Ready to edit");
+  const [dragActive, setDragActive] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [provider, setProvider] = useState(defaultProvider);
@@ -204,40 +211,57 @@ function App() {
       kind,
       name: `${kind === "Video" ? "V" : "A"}${project.tracks.filter((track) => track.kind === kind).length + 1}`,
     });
-  const importMedia = async () => {
+  const importPaths = useCallback(async (paths: string[]) => {
+    if (paths.length === 0) return;
     try {
-      const path = await open({
-        multiple: false,
-        directory: false,
-        filters: [
-          { name: "Video", extensions: ["mp4", "mov", "mkv", "m4v", "avi"] },
-        ],
-      });
-      if (!path || Array.isArray(path)) return;
-      setNotice(`Inspecting ${fileName(path)}…`);
-      const media = await invoke<MediaInfo>("probe_media", { path });
-      let track = project.tracks.find((item) => item.kind === "Video");
-      if (!track) {
-        const outcome = await addTrack("Video");
-        track = outcome?.project.tracks.find((item) => item.kind === "Video");
-      }
-      if (!track) return;
-      const outPoint = media.duration_us > 0 ? media.duration_us : 10_000_000;
-      await command({
-        command: "add_clip",
-        track_id: track.id,
-        clip: {
-          source_path: path,
-          in_point: 0,
-          out_point: outPoint,
-          position: Object.keys(project.clips).length === 0 ? 0 : duration,
-        },
-      });
-      setNotice(`Imported ${fileName(path)} · ${timecode(outPoint)}`);
+      setNotice(`Reading ${paths.length === 1 ? fileName(paths[0]) : `${paths.length} sources`}…`);
+      const outcome = await invoke<MediaImportOutcome>("import_media", { paths });
+      apply(outcome);
+      const firstImported = Object.values(outcome.project.clips).find((clip) =>
+        outcome.imported_paths.includes(clip.source_path),
+      );
+      if (firstImported) setSelected(firstImported.id);
+      const skipped = outcome.skipped_paths.length;
+      setNotice(
+        `${outcome.imported_paths.length} linked ${outcome.imported_paths.length === 1 ? "clip" : "clips"}${skipped ? ` · ${skipped} skipped` : ""}`,
+      );
     } catch (error) {
       setNotice(`Import failed: ${String(error)}`);
     }
+  }, []);
+  const importMedia = async () => {
+    const selection = await open({
+      multiple: true,
+      filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "m4v", "avi", "webm", "mts", "m2ts"] }],
+    });
+    if (!selection) return;
+    await importPaths(Array.isArray(selection) ? selection : [selection]);
   };
+  const importFolder = async () => {
+    const selection = await open({ directory: true, multiple: false, recursive: true });
+    if (typeof selection === "string") await importPaths([selection]);
+  };
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    try {
+      void getCurrentWindow()
+        .onDragDropEvent((event) => {
+          if (event.payload.type === "enter") setDragActive(true);
+          if (event.payload.type === "leave") setDragActive(false);
+          if (event.payload.type === "drop") {
+            setDragActive(false);
+            void importPaths(event.payload.paths);
+          }
+        })
+        .then((stop) => {
+          unlisten = stop;
+        })
+        .catch(() => undefined);
+    } catch {
+      // Browser preview does not expose Tauri's native drag-and-drop API.
+    }
+    return () => unlisten?.();
+  }, [importPaths]);
   const saveProject = async () => {
     try {
       const path = await save({
@@ -303,7 +327,7 @@ function App() {
   };
   return (
     <TooltipProvider>
-      <main className="min-h-screen min-w-[1120px] bg-background text-foreground">
+      <main className="relative min-h-screen min-w-[1120px] bg-background text-foreground">
         <header className="flex h-14 items-center border-b px-5">
           <div className="flex w-72 items-center gap-3">
             <div className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
@@ -350,6 +374,10 @@ function App() {
             <Plus data-icon="inline-start" />
             Import media
           </Button>
+          <Button variant="outline" size="sm" onClick={() => void importFolder()}>
+            <FolderInput data-icon="inline-start" />
+            Import folder
+          </Button>
           <Separator orientation="vertical" className="mx-1 h-4" />
           <IconButton
             label="Undo"
@@ -385,7 +413,7 @@ function App() {
             <PanelTitle icon={<Layers2 />} title="Media" />
             <div className="p-3">
               {Object.values(project.clips).length === 0 ? (
-                <EmptyMedia />
+                <EmptyMedia importMedia={importMedia} importFolder={importFolder} />
               ) : (
                 <div className="flex flex-col gap-1">
                   {Object.values(project.clips).map((clip) => (
@@ -401,7 +429,7 @@ function App() {
                           {fileName(clip.source_path)}
                         </span>
                         <span className="block font-mono text-[10px] text-muted-foreground">
-                          {timecode(clip.out_point - clip.in_point)}
+                          {timecode(clip.out_point - clip.in_point)} · linked source
                         </span>
                       </span>
                     </Button>
@@ -453,6 +481,17 @@ function App() {
           setProvider={setProvider}
           saveProvider={saveProvider}
         />
+        {dragActive && (
+          <div className="pointer-events-none absolute inset-3 grid place-items-center rounded-xl border-2 border-dashed bg-background/90">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <Upload className="text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium">Drop media or a folder to link it</p>
+                <p className="mt-1 text-xs text-muted-foreground">Original files stay where they are, including network storage.</p>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </TooltipProvider>
   );
@@ -465,15 +504,31 @@ function PanelTitle({ icon, title }: { icon: React.ReactNode; title: string }) {
     </div>
   );
 }
-function EmptyMedia() {
+function EmptyMedia({
+  importMedia,
+  importFolder,
+}: {
+  importMedia: () => Promise<void>;
+  importFolder: () => Promise<void>;
+}) {
   return (
     <Card size="sm" className="border-dashed bg-transparent shadow-none">
       <CardHeader>
         <CardTitle className="text-sm">No media yet</CardTitle>
         <CardDescription className="text-xs">
-          Use “Import media” in the top bar to add your first flight.
+          Link files, folders, or drop them here. Originals are never copied.
         </CardDescription>
       </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <Button size="sm" onClick={() => void importMedia()}>
+          <Plus data-icon="inline-start" />
+          Choose media
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => void importFolder()}>
+          <FolderInput data-icon="inline-start" />
+          Choose folder
+        </Button>
+      </CardContent>
     </Card>
   );
 }
@@ -505,6 +560,7 @@ function Preview({
   setPlayhead: (value: number) => void;
   setPlaying: (value: boolean) => void;
 }) {
+  const source = selectedClip ? mediaSource(selectedClip.source_path) : undefined;
   return (
     <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px]">
       <div className="grid place-items-center p-6">
@@ -512,24 +568,34 @@ function Preview({
           <div className="absolute inset-0 preview-grid" />
           <div className="absolute inset-[8%] border border-dashed border-border/70" />
           <div className="absolute left-[-10%] top-1/2 w-[120%] border-t border-foreground/30 -rotate-6" />
-          <div className="absolute inset-0 grid place-items-center text-center">
-            <div>
-              <Badge
-                variant="outline"
-                className="mb-3 font-mono text-[10px] uppercase tracking-[.18em]"
-              >
-                Monitor 01
-              </Badge>
-              <h1 className="font-heading text-base font-semibold">
-                {selectedClip
-                  ? fileName(selectedClip.source_path)
-                  : "Select a clip to preview"}
-              </h1>
-              <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                Rec 709 · video monitor
-              </p>
+          {source ? (
+            <video
+              key={selectedClip?.id}
+              className="absolute inset-0 size-full bg-black object-contain"
+              controls
+              preload="metadata"
+              src={source}
+            >
+              Your system cannot play this source format.
+            </video>
+          ) : (
+            <div className="absolute inset-0 grid place-items-center text-center">
+              <div>
+                <Badge
+                  variant="outline"
+                  className="mb-3 font-mono text-[10px] uppercase tracking-[.18em]"
+                >
+                  Monitor 01
+                </Badge>
+                <h1 className="font-heading text-base font-semibold">
+                  Select a clip to preview
+                </h1>
+                <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Link a source to start editing
+                </p>
+              </div>
             </div>
-          </div>
+          )}
           <div className="absolute bottom-3 left-4 right-4 flex justify-between font-mono text-[10px] text-muted-foreground">
             <span>{timecode(playhead)}</span>
             <span>60 FPS</span>
