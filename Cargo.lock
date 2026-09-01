@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "fpv-ai"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "async-openai",
  "fpv-core",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "fpv-app"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "fpv-ai",
@@ -1488,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "fpv-cli"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1503,7 +1503,7 @@ dependencies = [
 
 [[package]]
 name = "fpv-core"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1513,7 +1513,7 @@ dependencies = [
 
 [[package]]
 name = "fpv-gpu"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "bytemuck",
  "fpv-stabilize",
@@ -1524,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "fpv-mcp"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "fpv-ai",
@@ -1539,7 +1539,7 @@ dependencies = [
 
 [[package]]
 name = "fpv-media"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "fpv-core",
  "serde",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "fpv-stabilize"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "fpv-core",
  "serde",
