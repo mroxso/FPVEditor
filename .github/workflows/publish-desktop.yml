@@ -7,11 +7,21 @@ on:
         description: Release tag to build and publish
         required: true
         type: string
+      source_ref:
+        description: Source revision to build; defaults to the release tag
+        required: false
+        default: ""
+        type: string
   workflow_dispatch:
     inputs:
       tag:
         description: Existing release tag to build and publish
         required: true
+        type: string
+      source_ref:
+        description: Source revision to build; defaults to the release tag
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -40,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.source_ref || inputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
