@@ -1234,22 +1234,13 @@ function Timeline({
       <button aria-label="Resize timeline" className="timeline-resize-handle" onPointerDown={resize}>
         <GripHorizontal />
       </button>
-      <div className="grid h-12 grid-cols-[148px_minmax(180px,1fr)_420px] border-b">
+      <div className="grid h-12 grid-cols-[148px_minmax(0,1fr)] border-b">
         <div className="flex items-center gap-2 border-r px-4">
           <span className="text-xs font-medium">Timeline</span>
           <Badge variant="outline" className="font-mono text-[9px]">
             MAGNETIC
           </Badge>
           {tool === "razor" && <span className="font-mono text-[9px] uppercase tracking-wide text-foreground">Razor active</span>}
-        </div>
-        <div className="timeline-ruler relative" onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}>
-          {[0, 5, 10, 15, 20, 25, 30].map((second) => (
-            <span
-              key={second}
-              className="absolute top-3 font-mono text-[10px] text-muted-foreground"
-              style={{ left: `${(second / 30) * 100}%` }}
-            >{`00:${String(second).padStart(2, "0")}`}</span>
-          ))}
         </div>
         <div className="timeline-tools flex items-center justify-end gap-1 px-2">
           <Button
@@ -1296,7 +1287,19 @@ function Timeline({
           </Button>
         </div>
       </div>
-      <div className="relative overflow-auto" style={{ height: "calc(100% - 48px)" }}>
+      <div className="grid h-10 grid-cols-[148px_minmax(0,1fr)] border-b">
+        <div className="border-r" />
+        <div className="timeline-ruler relative" onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}>
+          {[0, 5, 10, 15, 20, 25, 30].map((second) => (
+            <span
+              key={second}
+              className="absolute top-3 font-mono text-[10px] text-muted-foreground"
+              style={{ left: `${(second / 30) * 100}%` }}
+            >{`00:${String(second).padStart(2, "0")}`}</span>
+          ))}
+        </div>
+      </div>
+      <div className="relative overflow-auto" style={{ height: "calc(100% - 88px)" }}>
         {project.tracks.length === 0 && (
           <div className="grid h-full place-items-center text-center">
             <div>
@@ -1362,7 +1365,7 @@ function Timeline({
         ))}
       </div>
       <div
-        className="absolute bottom-0 top-12 w-px bg-foreground"
+        className="pointer-events-none absolute bottom-0 top-[88px] z-10 w-px bg-foreground"
         style={{
           left: `calc(148px + ${(playhead / duration) * 100}% * (100% - 148px) / 100)`,
         }}
