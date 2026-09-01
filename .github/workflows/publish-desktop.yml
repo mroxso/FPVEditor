@@ -74,8 +74,14 @@ jobs:
         with:
           name: ${{ matrix.target }}
           path: |
-            target/**/bundle/**/*
-            crates/fpv-app/target/**/bundle/**/*
+            target/**/bundle/*/*.AppImage
+            target/**/bundle/*/*.deb
+            target/**/bundle/*/*.dmg
+            target/**/bundle/*/*.msi
+            crates/fpv-app/target/**/bundle/*/*.AppImage
+            crates/fpv-app/target/**/bundle/*/*.deb
+            crates/fpv-app/target/**/bundle/*/*.dmg
+            crates/fpv-app/target/**/bundle/*/*.msi
           if-no-files-found: error
 
   release:
