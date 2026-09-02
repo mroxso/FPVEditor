@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/mroxso/FPVEditor/compare/v0.9.0...v0.10.0) (2026-09-02)
+
+
+### Features
+
+* add standalone fpv CLI installer ([#60](https://github.com/mroxso/FPVEditor/issues/60)) ([4c1b57c](https://github.com/mroxso/FPVEditor/commit/4c1b57cbb32d6a05a6777c3ef602903a99196b93))
+
 ## [0.9.0](https://github.com/mroxso/FPVEditor/compare/v0.8.1...v0.9.0) (2026-09-02)
 
 
