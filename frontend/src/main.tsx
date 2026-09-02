@@ -1324,6 +1324,7 @@ function Timeline({
   grid: TimelineGrid;
 }) {
   const [draggingClip, setDraggingClip] = useState<{ id: string; position: number; trackId: string }>();
+  const [razorPosition, setRazorPosition] = useState<number>();
   const rulerTicks = useMemo(() => {
     const totalSeconds = Math.max(0.001, duration / 1_000_000);
     const targetStep = totalSeconds / 6;
@@ -1432,7 +1433,11 @@ function Timeline({
     event.currentTarget.addEventListener("pointerup", finish, { once: true });
   };
   return (
-    <section className={`timeline-editor timeline-grid-${grid} relative overflow-hidden border-t bg-card ${tool === "razor" ? "is-razor" : "is-select"}`} style={{ height }}>
+    <section
+      className={`timeline-editor timeline-grid-${grid} relative overflow-hidden border-t bg-card ${tool === "razor" ? "is-razor" : "is-select"}`}
+      style={{ height }}
+      onPointerLeave={() => setRazorPosition(undefined)}
+    >
       <button aria-label="Resize timeline" className="timeline-resize-handle" onPointerDown={resize}>
         <GripHorizontal />
       </button>
@@ -1495,7 +1500,11 @@ function Timeline({
       </div>
       <div className="grid h-10 grid-cols-[148px_minmax(0,1fr)] border-b">
         <div className="border-r" />
-        <div className="timeline-ruler relative" onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}>
+        <div
+          className="timeline-ruler relative"
+          onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}
+          onPointerMove={(event) => tool === "razor" && setRazorPosition(timeAtPointer(event, event.currentTarget))}
+        >
           {rulerTicks.map((tick) => (
             <span
               key={tick}
@@ -1528,9 +1537,14 @@ function Timeline({
                 {track.kind}
               </p>
             </div>
-            <div className="timeline-lane relative" data-timeline-lane onPointerDown={(event) => {
-              if (event.target === event.currentTarget) setPlayhead(timeAtPointer(event, event.currentTarget));
-            }}>
+            <div
+              className="timeline-lane relative"
+              data-timeline-lane
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) setPlayhead(timeAtPointer(event, event.currentTarget));
+              }}
+              onPointerMove={(event) => tool === "razor" && setRazorPosition(timeAtPointer(event, event.currentTarget))}
+            >
               {(draggingClip?.trackId === track.id && !track.clip_order.includes(draggingClip.id)
                 ? [...track.clip_order, draggingClip.id]
                 : track.clip_order
@@ -1573,6 +1587,12 @@ function Timeline({
         ))}
       </div>
       <div className="pointer-events-none absolute bottom-0 left-[148px] right-0 top-[52px] z-10">
+        {tool === "razor" && razorPosition !== undefined && (
+          <div
+            className="timeline-razor-marker absolute bottom-0 top-0"
+            style={{ left: `${(razorPosition / duration) * 100}%` }}
+          />
+        )}
         <div
           className="timeline-playhead-line absolute bottom-0 top-0"
           style={{ left: `${(playhead / duration) * 100}%` }}
