@@ -130,9 +130,9 @@ Mount your project directory to `/work` (the image's working directory) to
 edit local files:
 
 ```sh
-docker run --rm -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
+docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
   new project.fpv.json --name "My FPV Edit"
-docker run --rm -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
+docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
   export project.fpv.json --clip <clip-id> --output out.mp4
 ```
 

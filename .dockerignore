@@ -1,6 +1,5 @@
 target
-frontend/node_modules
-frontend/dist
+frontend
 docs
 .git
 .github

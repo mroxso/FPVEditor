@@ -84,9 +84,9 @@ The entrypoint runs `fpv` directly, and the image's working directory is `/work`
 local directory there to operate on your own project files:
 
 ```sh
-docker run --rm -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
+docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
   new project.fpv.json --name "My FPV Edit"
-docker run --rm -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
+docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
   export project.fpv.json --clip <clip-id> --output out.mp4
 ```
 

@@ -13,7 +13,7 @@ COPY crates ./crates
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
-    cargo build --release -p fpv-cli && \
+    cargo build --release --locked -p fpv-cli && \
     cp target/release/fpv /build/fpv
 
 # Runtime: minimal image with fpv plus the FFmpeg/FFprobe it shells out to.
