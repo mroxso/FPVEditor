@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.0](https://github.com/mroxso/FPVEditor/compare/v0.8.1...v0.9.0) (2026-09-02)
+
+
+### Features
+
+* add configurable timeline export ([#56](https://github.com/mroxso/FPVEditor/issues/56)) ([8fa7172](https://github.com/mroxso/FPVEditor/commit/8fa717294c64707fc0f005255449c55f911d77fa))
+* delete timeline tracks from headers ([#55](https://github.com/mroxso/FPVEditor/issues/55)) ([8c2f316](https://github.com/mroxso/FPVEditor/commit/8c2f316f2c07102bd1d9f84a69dd77b18d734482))
+* show update availability in project overview ([#52](https://github.com/mroxso/FPVEditor/issues/52)) ([5353fe8](https://github.com/mroxso/FPVEditor/commit/5353fe822037c21a1f3f3138144da20b60a394d5))
+
 ## [0.8.1](https://github.com/mroxso/FPVEditor/compare/v0.8.0...v0.8.1) (2026-09-02)
 
 
