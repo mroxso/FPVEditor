@@ -35,10 +35,11 @@
 .timeline-tool.is-active kbd { color: oklch(.78 0 0); }
 .timeline-clip.is-moving { z-index: 12; opacity: .84; box-shadow: 0 8px 22px oklch(0 0 0 / 42%); }
 .timeline-playhead-line { width: 2px; background: oklch(.63 .25 27); box-shadow: 0 0 10px oklch(.63 .25 27 / 78%); }
+.timeline-razor-marker { width: 1px; background: oklch(.7 0 0 / 70%); }
 .timeline-playhead { width: 18px; height: 18px; transform: translate(-50%, -25%); border: 0; background: transparent; padding: 0; cursor: ew-resize; touch-action: none; }
 .timeline-playhead::before { position: absolute; inset: 4px; transform: rotate(45deg); background: oklch(.63 .25 27); content: ""; }
 .timeline-editor.is-razor .timeline-ruler,
 .timeline-editor.is-razor .timeline-lane,
 .timeline-editor.is-razor .timeline-clip {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='6' cy='6' r='3'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Cpath d='m8.6 7.5 11.1 6.3'/%3E%3Cpath d='m8.6 16.5 11.1-6.3'/%3E%3C/svg%3E") 8 12, crosshair !important;
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' fill='none' stroke='%23ffffff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10' cy='10' r='3'/%3E%3Ccircle cx='10' cy='22' r='3'/%3E%3Cpath d='m12.6 11.5 11.1 6.3'/%3E%3Cpath d='m12.6 20.5 11.1-6.3'/%3E%3C/svg%3E") 18 16, crosshair !important;
 }
