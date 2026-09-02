@@ -630,7 +630,7 @@ function App() {
           className="grid min-h-0"
           style={{
             gridTemplateColumns: [
-              showMedia ? (mediaOpen ? "230px" : "42px") : "0px",
+              ...(showMedia ? [mediaOpen ? "230px" : "42px"] : []),
               "minmax(420px,1fr)",
               ...(showInspector ? [inspectorOpen ? "270px" : "42px"] : []),
               ...(showCopilot ? ["310px"] : []),
