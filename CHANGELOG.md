@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0](https://github.com/mroxso/FPVEditor/compare/v0.6.1...v0.7.0) (2026-09-02)
+
+
+### Features
+
+* configure timeline grid in Settings ([#34](https://github.com/mroxso/FPVEditor/issues/34)) ([4bf1694](https://github.com/mroxso/FPVEditor/commit/4bf1694ec3f3b85c1fa890b8699a435ab975adb0))
+* manage recent projects and return to overview ([#36](https://github.com/mroxso/FPVEditor/issues/36)) ([d687759](https://github.com/mroxso/FPVEditor/commit/d68775938917bae62c655faadbbbe5a2698058a5))
+
+
+### Bug Fixes
+
+* align header action controls ([#38](https://github.com/mroxso/FPVEditor/issues/38)) ([29fcc18](https://github.com/mroxso/FPVEditor/commit/29fcc18b470092475bb4af9f0fc87f821ca8ced3))
+* align timeline ruler with project duration ([#23](https://github.com/mroxso/FPVEditor/issues/23)) ([fd0f065](https://github.com/mroxso/FPVEditor/commit/fd0f06511624e16bad12888d66a289082be47fb4))
+* Move Test Connection action into AI Settings ([#37](https://github.com/mroxso/FPVEditor/issues/37)) ([dec073b](https://github.com/mroxso/FPVEditor/commit/dec073bbbf1dbe470efa05c8a98dd9bbbed40a2d))
+* render previews lazily ([#21](https://github.com/mroxso/FPVEditor/issues/21)) ([2207022](https://github.com/mroxso/FPVEditor/commit/220702254fb6cfd57b78ab879be729173d2d4db3))
+* synchronize timeline trimming ([#24](https://github.com/mroxso/FPVEditor/issues/24)) ([f5d7781](https://github.com/mroxso/FPVEditor/commit/f5d7781ce8a3a7033f1fd15305b70cd4e4a3835c))
+
 ## [0.6.1](https://github.com/mroxso/FPVEditor/compare/v0.6.0...v0.6.1) (2026-09-01)
 
 
