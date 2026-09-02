@@ -231,7 +231,11 @@ impl AppState {
     /// Build a self-contained monitor rendition. Keeping this in the service
     /// layer ensures the desktop UI never has to guess how project effects
     /// should be applied.
-    pub async fn render_preview(&self, clip_id: Option<fpv_core::ClipId>) -> Result<PathBuf> {
+    pub async fn render_preview(
+        &self,
+        clip_id: Option<fpv_core::ClipId>,
+        start: Option<Timecode>,
+    ) -> Result<PathBuf> {
         let project = self.bus.lock().await.project().clone();
         let root = std::env::temp_dir().join("fpv-editor-preview");
         fs::create_dir_all(&root).context("cannot create preview cache")?;
@@ -269,8 +273,16 @@ impl AppState {
                 )
                 .context("could not render clip preview")?;
             } else {
-                fpv_media::export_timeline_preview(&project, &rendered_path)
-                    .context("could not render timeline preview")?;
+                // The monitor needs only the next few seconds at the playhead;
+                // rendering the whole timeline here made import and editing
+                // increasingly slow as projects grew.
+                fpv_media::export_timeline_preview_range(
+                    &project,
+                    &rendered_path,
+                    start.unwrap_or(Timecode::ZERO),
+                    Timecode::from_seconds(8.0),
+                )
+                .context("could not render timeline preview")?;
             }
             Ok(())
         })

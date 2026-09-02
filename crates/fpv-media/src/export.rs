@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fpv_core::{Clip, Project, TrackKind};
+use fpv_core::{Clip, Project, Timecode, TrackKind};
 
 use crate::error::MediaResult;
 use crate::process;
@@ -129,8 +129,21 @@ pub fn export_clip_preview(clip: &Clip, settings: &ExportSettings) -> MediaResul
 /// preview is video-only for now; audio mixing belongs in the final export
 /// pipeline, where track gain and transitions can be represented explicitly.
 pub fn export_timeline_preview(project: &Project, output_path: &Path) -> MediaResult<()> {
+    export_timeline_preview_range(project, output_path, Timecode::ZERO, project.duration())
+}
+
+/// Render only a timeline window for the editor monitor. This keeps preview
+/// work proportional to what the user is about to watch instead of rendering
+/// every source clip in a long project before playback can begin.
+pub fn export_timeline_preview_range(
+    project: &Project,
+    output_path: &Path,
+    start: Timecode,
+    duration: Timecode,
+) -> MediaResult<()> {
     let (width, height) = preview_dimensions(project.width, project.height);
-    let clips: Vec<&Clip> = project
+    let end = Timecode(start.0.saturating_add(duration.0.max(1)));
+    let clips: Vec<Clip> = project
         .tracks
         .iter()
         .filter(|track| track.kind == TrackKind::Video)
@@ -139,6 +152,20 @@ pub fn export_timeline_preview(project: &Project, output_path: &Path) -> MediaRe
                 .clip_order
                 .iter()
                 .filter_map(|id| project.clips.get(id))
+                .filter_map(|clip| {
+                    let clip_start = clip.position;
+                    let clip_end = clip.position + clip.source_duration();
+                    let visible_start = clip_start.max(start);
+                    let visible_end = clip_end.min(end);
+                    if visible_start >= visible_end {
+                        return None;
+                    }
+                    let mut visible = clip.clone();
+                    visible.in_point = clip.in_point + (visible_start - clip_start);
+                    visible.out_point = clip.in_point + (visible_end - clip_start);
+                    visible.position = visible_start - start;
+                    Some(visible)
+                })
         })
         .collect();
     if clips.is_empty() {
@@ -166,7 +193,7 @@ pub fn export_timeline_preview(project: &Project, output_path: &Path) -> MediaRe
         rendered.push(path);
     }
 
-    let duration = (project.duration().seconds()).max(0.01);
+    let duration = duration.seconds().max(0.01);
     let mut args = vec![
         "-y".into(),
         "-f".into(),
@@ -429,6 +456,21 @@ mod tests {
         let info = crate::probe::probe(&output).unwrap();
         assert_eq!((info.width, info.height), (960, 540));
         assert!(info.duration_us >= 1_900_000);
+
+        let window_output = dir.join("timeline-window.mp4");
+        export_timeline_preview_range(
+            bus.project(),
+            &window_output,
+            Timecode::from_seconds(0.5),
+            Timecode::from_seconds(0.75),
+        )
+        .unwrap();
+        let window_info = crate::probe::probe(&window_output).unwrap();
+        assert!(
+            (700_000..=850_000).contains(&window_info.duration_us),
+            "expected a short monitor window, got {}us",
+            window_info.duration_us
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

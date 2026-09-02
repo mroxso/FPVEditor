@@ -644,6 +644,7 @@ function App() {
           <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px] bg-muted/30">
             {activePhase === "export" ? <ExportWorkspace project={project} selectedClip={selectedClip} saveProject={saveProject} /> : <Preview
               selectedClip={selectedClip}
+              phase={activePhase}
               mode={previewMode}
               setMode={setPreviewMode}
               requestId={previewRequestId}
@@ -800,6 +801,7 @@ function ExportWorkspace({ project, selectedClip, saveProject }: { project: Proj
 }
 function Preview({
   selectedClip,
+  phase,
   mode,
   setMode,
   requestId,
@@ -810,6 +812,7 @@ function Preview({
   setPlaying,
 }: {
   selectedClip?: Clip;
+  phase: WorkflowPhase;
   mode: PreviewMode;
   setMode: (mode: PreviewMode) => void;
   requestId: number;
@@ -823,17 +826,23 @@ function Preview({
   const [source, setSource] = useState<string>();
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string>();
+  const [previewStart, setPreviewStart] = useState(0);
   const selectedId = selectedClip?.id;
   useEffect(() => {
     let active = true;
-    // A selected clip is immediately playable while its effect-aware preview
-    // is prepared. This avoids a blank monitor during FFmpeg rendering.
+    // Imports should be instant: the original is already playable and we
+    // defer effect-aware rendering until the user enters an edit phase.
     setSource(mode === "clip" && selectedClip ? mediaSource(selectedClip.source_path) : undefined);
+    if (mode === "clip") setPreviewStart(0);
     setError(undefined);
     if (mode === "clip" && !selectedId) return;
+    if (mode === "clip" && phase === "import") return;
+    const start = mode === "timeline" ? playhead : 0;
+    setPreviewStart(start);
     setRendering(true);
     void invoke<string>("render_preview", {
       clipId: mode === "clip" ? selectedId : null,
+      start: mode === "timeline" ? start : null,
     })
       .then((path) => {
         if (active) setSource(mediaSource(path));
@@ -848,7 +857,7 @@ function Preview({
         if (active) setRendering(false);
       });
     return () => { active = false; };
-  }, [mode, requestId, selectedId, selectedClip]);
+  }, [mode, phase, requestId, selectedId, selectedClip]);
   useEffect(() => {
     const element = video.current;
     if (!element) return;
@@ -858,7 +867,7 @@ function Preview({
   useEffect(() => {
     const element = video.current;
     if (!element || !Number.isFinite(element.duration)) return;
-    const target = Math.min(element.duration, playhead / 1_000_000);
+    const target = Math.min(element.duration, (playhead - previewStart) / 1_000_000);
     // Native playback updates the shared playhead too. Only seek when the
     // difference is meaningful, otherwise normal playback would stutter.
     if (Math.abs(element.currentTime - target) > 0.04) element.currentTime = target;
@@ -866,10 +875,10 @@ function Preview({
   const seek = (next: number) => {
     const value = Math.max(0, Math.min(duration, next));
     setPlayhead(value);
-    if (video.current) video.current.currentTime = value / 1_000_000;
+    if (video.current) video.current.currentTime = (value - previewStart) / 1_000_000;
   };
   const seekToPlayhead = (element: HTMLVideoElement) => {
-    element.currentTime = Math.min(element.duration || 0, playhead / 1_000_000);
+    element.currentTime = Math.min(element.duration || 0, (playhead - previewStart) / 1_000_000);
   };
   return (
     <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px]">
@@ -883,11 +892,10 @@ function Preview({
               ref={video}
               key={source}
               className="absolute inset-0 size-full bg-black object-contain"
-              controls
               preload="metadata"
               src={source}
               onLoadedMetadata={(event) => seekToPlayhead(event.currentTarget)}
-              onTimeUpdate={(event) => setPlayhead(event.currentTarget.currentTime * 1_000_000)}
+              onTimeUpdate={(event) => setPlayhead(previewStart + event.currentTarget.currentTime * 1_000_000)}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
