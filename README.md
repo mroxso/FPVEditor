@@ -116,6 +116,29 @@ choose another installation directory on macOS/Linux, set `FPV_VERSION` or
 `FPV_INSTALL_DIR` before running it. To uninstall, remove `fpv` from
 `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\\FPVEditor\\bin` on Windows.
 
+### Run the CLI with Docker
+
+A self-contained image with `fpv`, FFmpeg, and FFprobe already installed is
+published to GHCR:
+
+```sh
+docker pull ghcr.io/mroxso/fpveditor:latest
+docker run --rm ghcr.io/mroxso/fpveditor:latest --help
+```
+
+Mount your project directory to `/work` (the image's working directory) to
+edit local files:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
+  new project.fpv.json --name "My FPV Edit"
+docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
+  export project.fpv.json --clip <clip-id> --output out.mp4
+```
+
+Images are tagged with each release version (for example `0.10.1`) and
+`latest` tracks the most recent release.
+
 ### Use the CLI
 
 ```sh
