@@ -134,6 +134,20 @@ type ToolDiagnostic = {
   message: string;
 };
 type MediaDiagnostics = { ffmpeg: ToolDiagnostic; ffprobe: ToolDiagnostic };
+type ExportContainer = "mp4" | "mov" | "webm";
+type VideoCodec = "h264" | "h265" | "vp9";
+type AudioCodec = "aac" | "opus";
+type ExportSettings = {
+  output_path: string;
+  width: number;
+  height: number;
+  fps: number;
+  crf: number | null;
+  container: ExportContainer;
+  video_codec: VideoCodec;
+  audio_codec: AudioCodec;
+};
+type ExportCapabilities = { containers: ExportContainer[]; video_codecs: VideoCodec[]; audio_codecs: AudioCodec[] };
 type WorkflowPhase = "import" | "stabilize" | "cut" | "grade" | "export";
 type EditTool = "select" | "razor";
 type PreviewMode = "clip" | "timeline";
@@ -1034,7 +1048,37 @@ function EmptyInspector() {
   );
 }
 function ExportWorkspace({ project, selectedClip, saveProject }: { project: Project; selectedClip?: Clip; saveProject: () => Promise<boolean> }) {
-  return <section className="grid place-items-center p-8"><div className="w-full max-w-xl"><Badge variant="outline" className="mb-5 font-mono text-[10px] uppercase tracking-[.18em]">Final check</Badge><h1 className="font-heading text-2xl font-semibold">Ready to deliver?</h1><p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Review the project settings, save your edit, then render from the export pipeline.</p><div className="mt-7 grid grid-cols-3 gap-px overflow-hidden rounded-lg border bg-border"><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Clips</p><p className="mt-1 text-lg font-medium">{Object.keys(project.clips).length}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Format</p><p className="mt-1 text-lg font-medium">{project.width}×{project.height}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Frame rate</p><p className="mt-1 text-lg font-medium">{project.fps} fps</p></div></div><Card className="mt-5 shadow-none"><CardHeader><CardTitle className="text-sm">Desktop export</CardTitle><CardDescription className="text-xs">Save the project now. Final rendering is currently available through the project export pipeline; this workspace keeps delivery settings separate from the edit.</CardDescription></CardHeader><CardContent><Button onClick={() => void saveProject()}><Download data-icon="inline-start" />Save project</Button>{selectedClip && <p className="mt-3 text-xs text-muted-foreground">Selected clip: {fileName(selectedClip.source_path)}</p>}</CardContent></Card></div></section>;
+  const [container, setContainer] = useState<ExportContainer>("mp4");
+  const [videoCodec, setVideoCodec] = useState<VideoCodec>("h264");
+  const [audioCodec, setAudioCodec] = useState<AudioCodec>("aac");
+  const [width, setWidth] = useState(project.width);
+  const [height, setHeight] = useState(project.height);
+  const [fps, setFps] = useState(project.fps);
+  const [crf, setCrf] = useState(23);
+  const [exporting, setExporting] = useState(false);
+  const [result, setResult] = useState<string>();
+  const [capabilities, setCapabilities] = useState<ExportCapabilities>();
+  useEffect(() => { void invoke<ExportCapabilities>("export_capabilities").then(setCapabilities).catch((error) => setResult(`Unable to inspect FFmpeg: ${String(error)}`)); }, []);
+  const chooseContainer = (value: ExportContainer) => {
+    setContainer(value);
+    if (value === "webm") { setVideoCodec("vp9"); setAudioCodec("opus"); }
+  };
+  const runExport = async () => {
+    const outputPath = await save({ defaultPath: `${project.name || "flight"}.${container}`, filters: [{ name: container.toUpperCase(), extensions: [container] }] });
+    if (!outputPath) return;
+    setExporting(true); setResult(undefined);
+    try {
+      const settings: ExportSettings = { output_path: outputPath, width, height, fps, crf, container, video_codec: videoCodec, audio_codec: audioCodec };
+      await invoke("export_timeline", { settings });
+      setResult(`Export complete: ${fileName(outputPath)}`);
+    } catch (error) { setResult(`Export failed: ${String(error)}`); }
+    finally { setExporting(false); }
+  };
+  const selectClass = "h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs";
+  const supportedContainers = capabilities?.containers ?? ["mp4", "mov", "webm"];
+  const supportedVideo = capabilities?.video_codecs ?? ["h264", "h265", "vp9"];
+  const supportedAudio = capabilities?.audio_codecs ?? ["aac", "opus"];
+  return <section className="grid place-items-center p-8"><div className="w-full max-w-xl"><Badge variant="outline" className="mb-5 font-mono text-[10px] uppercase tracking-[.18em]">Final delivery</Badge><h1 className="font-heading text-2xl font-semibold">Export your timeline</h1><p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Settings are sent directly to FFmpeg. MP4 / H.264 / AAC is the most compatible default.</p><div className="mt-7 grid grid-cols-3 gap-px overflow-hidden rounded-lg border bg-border"><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Clips</p><p className="mt-1 text-lg font-medium">{Object.keys(project.clips).length}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Resolution</p><p className="mt-1 text-lg font-medium">{width}×{height}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Frame rate</p><p className="mt-1 text-lg font-medium">{fps} fps</p></div></div><Card className="mt-5 shadow-none"><CardHeader><CardTitle className="text-sm">Export settings</CardTitle><CardDescription className="text-xs">Choices are filtered against your local FFmpeg. WebM is paired with VP9 and Opus.</CardDescription></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-xs font-medium">Container<select className={selectClass} value={container} onChange={(event) => chooseContainer(event.target.value as ExportContainer)}>{supportedContainers.map((value) => <option key={value} value={value}>{value.toUpperCase()}</option>)}</select></label><label className="grid gap-1.5 text-xs font-medium">Video codec<select className={selectClass} value={videoCodec} disabled={container === "webm"} onChange={(event) => setVideoCodec(event.target.value as VideoCodec)}>{supportedVideo.map((value) => <option key={value} value={value}>{value === "h264" ? "H.264" : value === "h265" ? "H.265 / HEVC" : "VP9"}</option>)}</select></label><label className="grid gap-1.5 text-xs font-medium">Audio codec<select className={selectClass} value={audioCodec} disabled={container === "webm"} onChange={(event) => setAudioCodec(event.target.value as AudioCodec)}>{supportedAudio.map((value) => <option key={value} value={value}>{value.toUpperCase()}</option>)}</select></label><label className="grid gap-1.5 text-xs font-medium">Quality (CRF, lower is better)<Input type="number" min="0" max="51" value={crf} onChange={(event) => setCrf(Number(event.target.value))} /></label><label className="grid gap-1.5 text-xs font-medium">Width<Input type="number" min="2" step="2" value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label><label className="grid gap-1.5 text-xs font-medium">Height<Input type="number" min="2" step="2" value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label><label className="grid gap-1.5 text-xs font-medium">Frame rate<Input type="number" min="1" step="0.01" value={fps} onChange={(event) => setFps(Number(event.target.value))} /></label><div className="flex items-end"><Button className="w-full" disabled={exporting || !Object.keys(project.clips).length} onClick={() => void runExport()}><Download data-icon="inline-start" />{exporting ? "Exporting…" : "Choose file & export"}</Button></div><div className="sm:col-span-2 flex items-center justify-between gap-3"><Button variant="outline" onClick={() => void saveProject()}>Save project</Button>{result && <p className={`text-xs ${result.startsWith("Export failed") ? "text-destructive" : "text-muted-foreground"}`}>{result}</p>}</div>{selectedClip && <p className="sm:col-span-2 text-xs text-muted-foreground">Selected clip: {fileName(selectedClip.source_path)}. Export renders the whole video timeline.</p>}</CardContent></Card></div></section>;
 }
 function Preview({
   project,

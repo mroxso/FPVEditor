@@ -28,12 +28,14 @@ use tokio::sync::{Mutex, Semaphore};
 
 pub use updates::UpdateCheckResult;
 
+type PreviewCache = Arc<Mutex<HashMap<(Option<String>, i64), PathBuf>>>;
+
 pub struct AppState {
     bus: Arc<Mutex<CommandBus>>,
     ai_config: Arc<Mutex<Option<ProviderConfig>>>,
     project_path: Arc<Mutex<Option<PathBuf>>>,
     preview_render_limit: Arc<Semaphore>,
-    preview_cache: Arc<Mutex<HashMap<(Option<String>, i64), PathBuf>>>,
+    preview_cache: PreviewCache,
 }
 
 impl Default for AppState {
@@ -90,7 +92,11 @@ impl AppState {
 
     /// Start a fresh unsaved project from the launcher.
     pub async fn new_project(&self, name: String) -> Project {
-        let project = Project::new(if name.trim().is_empty() { "Untitled" } else { &name });
+        let project = Project::new(if name.trim().is_empty() {
+            "Untitled"
+        } else {
+            &name
+        });
         *self.bus.lock().await = CommandBus::new(project.clone());
         *self.project_path.lock().await = None;
         self.clear_preview_cache().await;
@@ -267,6 +273,18 @@ impl AppState {
         fpv_media::export_clip(clip, settings).context("ffmpeg export failed")
     }
 
+    pub async fn export_timeline(&self, settings: fpv_media::ExportSettings) -> Result<()> {
+        let project = self.bus.lock().await.project().clone();
+        tokio::task::spawn_blocking(move || fpv_media::export_timeline(&project, &settings))
+            .await
+            .context("export renderer task stopped unexpectedly")?
+            .context("ffmpeg export failed")
+    }
+
+    pub fn export_capabilities(&self) -> Result<fpv_media::ExportCapabilities> {
+        fpv_media::export_capabilities().context("could not inspect local FFmpeg export support")
+    }
+
     /// Build a self-contained monitor rendition. Keeping this in the service
     /// layer ensures the desktop UI never has to guess how project effects
     /// should be applied.
@@ -317,6 +335,9 @@ impl AppState {
                         height,
                         fps: project.fps,
                         crf: Some(28),
+                        container: fpv_media::ExportContainer::Mp4,
+                        video_codec: fpv_media::VideoCodec::H264,
+                        audio_codec: fpv_media::AudioCodec::Aac,
                     },
                 )
                 .context("could not render clip preview")?;
@@ -516,7 +537,8 @@ mod tests {
             eprintln!("skipping: ffmpeg is not available on PATH");
             return;
         }
-        let root = std::env::temp_dir().join(format!("fpv-app-targeted-import-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("fpv-app-targeted-import-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let source_v2 = root.join("v2-source.mp4");
         let source_v3 = root.join("v3-source.mp4");
@@ -538,13 +560,46 @@ mod tests {
         }
 
         let state = AppState::default();
-        let v1 = state.execute_command(Command::AddTrack { kind: TrackKind::Video, name: "V1".into() }).await.unwrap().project.tracks[0].id;
-        let v2 = state.execute_command(Command::AddTrack { kind: TrackKind::Video, name: "V2".into() }).await.unwrap().project.tracks[1].id;
-        let v3 = state.execute_command(Command::AddTrack { kind: TrackKind::Video, name: "V3".into() }).await.unwrap().project.tracks[2].id;
+        let v1 = state
+            .execute_command(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V1".into(),
+            })
+            .await
+            .unwrap()
+            .project
+            .tracks[0]
+            .id;
+        let v2 = state
+            .execute_command(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V2".into(),
+            })
+            .await
+            .unwrap()
+            .project
+            .tracks[1]
+            .id;
+        let v3 = state
+            .execute_command(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V3".into(),
+            })
+            .await
+            .unwrap()
+            .project
+            .tracks[2]
+            .id;
 
-        let v2_import = state.import_media_paths(vec![source_v2], Some(v2)).await.unwrap();
+        let v2_import = state
+            .import_media_paths(vec![source_v2], Some(v2))
+            .await
+            .unwrap();
         let v2_clip = v2_import.project.tracks[1].clip_order[0];
-        let v3_import = state.import_media_paths(vec![source_v3], Some(v3)).await.unwrap();
+        let v3_import = state
+            .import_media_paths(vec![source_v3], Some(v3))
+            .await
+            .unwrap();
         let v3_clip = v3_import.project.tracks[2].clip_order[0];
 
         assert_eq!(v3_import.project.track_of_clip(v2_clip), Some(v2));

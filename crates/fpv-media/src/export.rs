@@ -6,18 +6,146 @@
 use std::path::{Path, PathBuf};
 
 use fpv_core::{Clip, Project, Timecode, TrackKind};
+use serde::{Deserialize, Serialize};
 
 use crate::error::MediaResult;
 use crate::process;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportContainer {
+    Mp4,
+    Mov,
+    Webm,
+}
+
+impl ExportContainer {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Mp4 => "mp4",
+            Self::Mov => "mov",
+            Self::Webm => "webm",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoCodec {
+    H264,
+    H265,
+    Vp9,
+}
+
+impl VideoCodec {
+    fn ffmpeg_name(self) -> &'static str {
+        match self {
+            Self::H264 => "libx264",
+            Self::H265 => "libx265",
+            Self::Vp9 => "libvpx-vp9",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioCodec {
+    Aac,
+    Opus,
+}
+
+impl AudioCodec {
+    fn ffmpeg_name(self) -> &'static str {
+        match self {
+            Self::Aac => "aac",
+            Self::Opus => "libopus",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExportSettings {
     pub output_path: PathBuf,
     pub width: u32,
     pub height: u32,
     pub fps: f64,
-    /// libx264 CRF (lower = higher quality), defaults to 23 if `None`.
+    /// Quality value appropriate for the selected codec (lower = better).
     pub crf: Option<u8>,
+    pub container: ExportContainer,
+    pub video_codec: VideoCodec,
+    pub audio_codec: AudioCodec,
+}
+
+/// The small, tested set of containers/codecs exposed by the app which this
+/// local FFmpeg installation can actually encode and mux.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportCapabilities {
+    pub containers: Vec<ExportContainer>,
+    pub video_codecs: Vec<VideoCodec>,
+    pub audio_codecs: Vec<AudioCodec>,
+}
+
+pub fn export_capabilities() -> MediaResult<ExportCapabilities> {
+    let encoders =
+        crate::process::run_capture_stdout("ffmpeg", &["-hide_banner".into(), "-encoders".into()])?;
+    let muxers =
+        crate::process::run_capture_stdout("ffmpeg", &["-hide_banner".into(), "-muxers".into()])?;
+    let has = |text: &str, name: &str| {
+        text.lines()
+            .any(|line| line.split_whitespace().any(|word| word == name))
+    };
+    Ok(ExportCapabilities {
+        containers: [
+            ExportContainer::Mp4,
+            ExportContainer::Mov,
+            ExportContainer::Webm,
+        ]
+        .into_iter()
+        .filter(|container| has(&muxers, container.extension()))
+        .collect(),
+        video_codecs: [VideoCodec::H264, VideoCodec::H265, VideoCodec::Vp9]
+            .into_iter()
+            .filter(|codec| has(&encoders, codec.ffmpeg_name()))
+            .collect(),
+        audio_codecs: [AudioCodec::Aac, AudioCodec::Opus]
+            .into_iter()
+            .filter(|codec| has(&encoders, codec.ffmpeg_name()))
+            .collect(),
+    })
+}
+
+impl ExportSettings {
+    pub fn validate(&self) -> MediaResult<()> {
+        if self.width == 0
+            || self.height == 0
+            || !self.width.is_multiple_of(2)
+            || !self.height.is_multiple_of(2)
+        {
+            return Err(crate::error::MediaError::Parse(
+                "resolution must use positive, even dimensions".into(),
+            ));
+        }
+        if !self.fps.is_finite() || self.fps <= 0.0 {
+            return Err(crate::error::MediaError::Parse(
+                "frame rate must be greater than zero".into(),
+            ));
+        }
+        if matches!(self.container, ExportContainer::Webm)
+            && !matches!(self.video_codec, VideoCodec::Vp9)
+        {
+            return Err(crate::error::MediaError::Parse(
+                "WebM requires the VP9 video codec in FPV Editor".into(),
+            ));
+        }
+        if matches!(self.container, ExportContainer::Webm)
+            && !matches!(self.audio_codec, AudioCodec::Opus)
+        {
+            return Err(crate::error::MediaError::Parse(
+                "WebM requires the Opus audio codec in FPV Editor".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Monitor renders should become interactive quickly and must not compete with
@@ -39,6 +167,9 @@ pub fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
 /// per-sample-accurate ramping needs a custom `setpts` expression built from
 /// the whole curve, tracked as future work (PLAN.md section 5).
 pub fn export_clip_args(clip: &Clip, settings: &ExportSettings) -> Vec<String> {
+    settings
+        .validate()
+        .expect("export settings must be validated before building arguments");
     let mut args: Vec<String> = vec!["-y".to_string()];
 
     args.push("-ss".to_string());
@@ -85,18 +216,129 @@ pub fn export_clip_args(clip: &Clip, settings: &ExportSettings) -> Vec<String> {
     args.push(format!("{}", settings.fps));
 
     args.push("-c:v".to_string());
-    args.push("libx264".to_string());
+    args.push(settings.video_codec.ffmpeg_name().to_string());
     args.push("-crf".to_string());
     args.push(settings.crf.unwrap_or(23).to_string());
     args.push("-pix_fmt".to_string());
     args.push("yuv420p".to_string());
+    args.extend([
+        "-c:a".into(),
+        settings.audio_codec.ffmpeg_name().into(),
+        "-movflags".into(),
+        "+faststart".into(),
+    ]);
 
     args.push(settings.output_path.to_string_lossy().to_string());
     args
 }
 
 pub fn export_clip(clip: &Clip, settings: &ExportSettings) -> MediaResult<()> {
+    settings.validate()?;
     let args = export_clip_args(clip, settings);
+    process::run("ffmpeg", &args)
+}
+
+/// Render all video clips into their timeline positions. Audio from timeline
+/// clips is delayed to the same position and mixed when sources provide it.
+pub fn export_timeline(project: &Project, settings: &ExportSettings) -> MediaResult<()> {
+    settings.validate()?;
+    let clips: Vec<&Clip> = project
+        .tracks
+        .iter()
+        .filter(|track| track.kind == TrackKind::Video)
+        .flat_map(|track| {
+            track
+                .clip_order
+                .iter()
+                .filter_map(|id| project.clips.get(id))
+        })
+        .collect();
+    if clips.is_empty() {
+        return Err(crate::error::MediaError::Parse(
+            "timeline has no video clips to export".into(),
+        ));
+    }
+    let duration = project.duration().seconds().max(0.01);
+    let mut args = vec![
+        "-y".into(),
+        "-f".into(),
+        "lavfi".into(),
+        "-i".into(),
+        format!(
+            "color=c=black:s={}x{}:r={}:d={duration}",
+            settings.width, settings.height, settings.fps
+        ),
+    ];
+    for clip in &clips {
+        args.extend([
+            "-ss".into(),
+            format!("{:.6}", clip.in_point.seconds()),
+            "-to".into(),
+            format!("{:.6}", clip.out_point.seconds()),
+            "-i".into(),
+            clip.source_path.to_string_lossy().into_owned(),
+        ]);
+    }
+    let mut filter = String::new();
+    let mut previous = "[0:v]".to_string();
+    let mut audio_labels = Vec::new();
+    for (index, clip) in clips.iter().enumerate() {
+        let input = index + 1;
+        let video = format!("[v{index}]");
+        let output = format!("[layer{index}]");
+        let mut video_filters = format!(
+            "[{input}:v]setpts=PTS-STARTPTS,scale={}:{}",
+            settings.width, settings.height
+        );
+        if let Some(lut) = &clip.lut_path {
+            video_filters.push_str(&format!(",lut3d='{}'", lut.to_string_lossy()));
+        }
+        video_filters.push_str(&format!("{video};{previous}{video}overlay=eof_action=pass:shortest=0:x=0:y=0:enable='between(t,{:.6},{:.6})'{output};", clip.position.seconds(), clip.position.seconds() + clip.source_duration().seconds()));
+        filter.push_str(&video_filters);
+        previous = output;
+        if crate::probe::probe(&clip.source_path)
+            .map(|info| info.has_audio)
+            .unwrap_or(false)
+        {
+            let audio = format!("[a{index}]");
+            filter.push_str(&format!(
+                "[{input}:a]asetpts=PTS-STARTPTS,adelay={}:all=1{audio};",
+                (clip.position.seconds() * 1000.0).round()
+            ));
+            audio_labels.push(audio);
+        }
+    }
+    filter.push_str(&format!("{previous}format=yuv420p[video];"));
+    if audio_labels.len() == 1 {
+        filter.push_str(&format!("{}anull[audio]", audio_labels[0]));
+    } else if !audio_labels.is_empty() {
+        filter.push_str(&format!(
+            "{}amix=inputs={}:duration=longest[audio]",
+            audio_labels.join(""),
+            audio_labels.len()
+        ));
+    }
+    args.extend([
+        "-filter_complex".into(),
+        filter,
+        "-map".into(),
+        "[video]".into(),
+        "-r".into(),
+        settings.fps.to_string(),
+        "-c:v".into(),
+        settings.video_codec.ffmpeg_name().into(),
+        "-crf".into(),
+        settings.crf.unwrap_or(23).to_string(),
+        "-c:a".into(),
+        settings.audio_codec.ffmpeg_name().into(),
+    ]);
+    if !audio_labels.is_empty() {
+        args.extend(["-map".into(), "[audio]".into()]);
+    }
+    if !matches!(settings.container, ExportContainer::Webm) {
+        args.extend(["-movflags".into(), "+faststart".into()]);
+    }
+    args.push(settings.output_path.to_string_lossy().into_owned());
     process::run("ffmpeg", &args)
 }
 
@@ -185,6 +427,9 @@ pub fn export_timeline_preview_range(
         height,
         fps: project.fps,
         crf: Some(28),
+        container: ExportContainer::Mp4,
+        video_codec: VideoCodec::H264,
+        audio_codec: AudioCodec::Aac,
     };
     let mut rendered = Vec::with_capacity(clips.len());
     for (index, clip) in clips.iter().enumerate() {
@@ -285,6 +530,9 @@ mod tests {
             height: 1080,
             fps: 60.0,
             crf: None,
+            container: ExportContainer::Mp4,
+            video_codec: VideoCodec::H264,
+            audio_codec: AudioCodec::Aac,
         }
     }
 
@@ -393,6 +641,9 @@ mod tests {
             height: 120,
             fps: 30.0,
             crf: Some(30),
+            container: ExportContainer::Mp4,
+            video_codec: VideoCodec::H264,
+            audio_codec: AudioCodec::Aac,
         };
         export_clip(&clip, &settings).expect("export should succeed");
 

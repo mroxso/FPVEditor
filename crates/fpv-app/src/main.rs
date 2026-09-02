@@ -105,6 +105,19 @@ async fn render_preview(
 }
 
 #[tauri::command]
+async fn export_timeline(
+    state: State<'_, AppState>,
+    settings: fpv_media::ExportSettings,
+) -> AppResult<()> {
+    app_error(state.export_timeline(settings).await)
+}
+
+#[tauri::command]
+fn export_capabilities(state: State<'_, AppState>) -> AppResult<fpv_media::ExportCapabilities> {
+    app_error(state.export_capabilities())
+}
+
+#[tauri::command]
 async fn configure_ai(state: State<'_, AppState>, config: ProviderConfig) -> AppResult<()> {
     state.configure_ai(config).await;
     Ok(())
@@ -159,6 +172,8 @@ fn main() {
             media_diagnostics,
             import_media,
             render_preview,
+            export_timeline,
+            export_capabilities,
             configure_ai,
             test_ai_connection,
             chat,

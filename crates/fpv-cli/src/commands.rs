@@ -78,6 +78,9 @@ pub fn cmd_export(
         height,
         fps,
         crf: None,
+        container: fpv_media::ExportContainer::Mp4,
+        video_codec: fpv_media::VideoCodec::H264,
+        audio_codec: fpv_media::AudioCodec::Aac,
     };
     fpv_media::export_clip(clip, &settings).context("ffmpeg export failed")?;
     println!(
@@ -99,6 +102,9 @@ pub async fn cmd_mcp_serve(path: &Path) -> Result<()> {
     let final_project = fpv_mcp::serve_stdio(bus).await?;
     fpv_core::project_file::save(&final_project, path)
         .with_context(|| format!("failed to save project at {}", path.display()))?;
-    eprintln!("fpv-mcp: session ended, project saved to {}", path.display());
+    eprintln!(
+        "fpv-mcp: session ended, project saved to {}",
+        path.display()
+    );
     Ok(())
 }
