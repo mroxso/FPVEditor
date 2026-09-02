@@ -24,10 +24,10 @@ jobs:
             os: macos-14
             asset: macos-arm64
             archive: tar.gz
-          - name: macOS x64
-            os: macos-13
-            asset: macos-x64
-            archive: tar.gz
+          #- name: macOS x64
+          #  os: macos-13
+          #  asset: macos-x64
+          #  archive: tar.gz
           - name: Windows x64
             os: windows-latest
             asset: windows-x64
