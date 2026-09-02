@@ -294,14 +294,18 @@ impl AppState {
                 // The monitor needs only the next few seconds at the playhead;
                 // rendering the whole timeline here made import and editing
                 // increasingly slow as projects grew.
+                let timeline_end = project.duration();
+                let preview_start = start.unwrap_or(Timecode::ZERO).min(timeline_end);
+                let preview_duration =
+                    (timeline_end - preview_start).min(Timecode::from_seconds(12.0));
                 fpv_media::export_timeline_preview_range(
                     &project,
                     &rendered_path,
-                    start.unwrap_or(Timecode::ZERO),
+                    preview_start,
                     // Keep a meaningful amount ahead of the playhead so the
-                    // monitor has room to play while the next window is
-                    // prepared.
-                    Timecode::from_seconds(12.0),
+                    // monitor has room to play while the next window is prepared,
+                    // but never render black frames beyond the project end.
+                    preview_duration,
                 )
                 .context("could not render timeline preview")?;
             }

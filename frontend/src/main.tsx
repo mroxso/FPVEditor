@@ -265,7 +265,9 @@ function App() {
   const duration = useMemo(
     () =>
       Math.max(
-        1_000_000,
+        // Keep only a non-zero divisor for an empty project.  A one-second
+        // floor made every sub-second trim look (and play) a full second long.
+        1,
         ...Object.values(project.clips).map(
           (clip) => clip.position + clip.out_point - clip.in_point,
         ),
@@ -276,7 +278,28 @@ function App() {
     setProject(outcome.project);
     setUndoable(outcome.can_undo);
     setRedoable(outcome.can_redo);
+    const nextDuration = Math.max(
+      1,
+      ...Object.values(outcome.project.clips).map(
+        (clip) => clip.position + clip.out_point - clip.in_point,
+      ),
+    );
+    if (playhead > nextDuration) {
+      setPlayhead(nextDuration);
+      setPlaying(false);
+    }
+    // The monitor rendition is derived from the previous project state.
+    // Requesting it again after every mutation makes trims visible at once.
+    setPreviewRequestId((current) => current + 1);
   };
+  useEffect(() => {
+    // A tail trim can put the current playhead beyond the new project end.
+    // Keep the ruler, monitor, and transport controls on the actual timeline.
+    if (playhead > duration) {
+      setPlayhead(duration);
+      setPlaying(false);
+    }
+  }, [duration, playhead]);
   const command = async (value: object): Promise<Outcome | undefined> => {
     try {
       const outcome = await invoke<Outcome>("execute", { command: value });
@@ -1511,10 +1534,7 @@ function Timeline({
                 if (draggingClip?.id === id && draggingClip.trackId !== track.id) return null;
                 const displayPosition = draggingClip?.id === id ? draggingClip.position : clip.position;
                 const left = (displayPosition / duration) * 100;
-                const width = Math.max(
-                  8,
-                  ((clip.out_point - clip.in_point) / duration) * 100,
-                );
+                const width = ((clip.out_point - clip.in_point) / duration) * 100;
                 return (
                   <button
                     key={id}

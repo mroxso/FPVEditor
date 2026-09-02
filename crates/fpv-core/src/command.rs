@@ -142,7 +142,7 @@ impl Command {
                 Ok(())
             }
             Command::AddClip { track_id, clip } => {
-                if clip.out_point <= clip.in_point {
+                if clip.in_point < Timecode::ZERO || clip.out_point <= clip.in_point {
                     return Err(CoreError::InvalidTrim {
                         clip: ClipId::new(),
                         in_point: clip.in_point.0,
@@ -187,7 +187,7 @@ impl Command {
                 let clip = project
                     .clip_mut(*clip_id)
                     .ok_or(CoreError::ClipNotFound(*clip_id))?;
-                if new_out <= new_in {
+                if *new_in < Timecode::ZERO || *new_out <= *new_in {
                     return Err(CoreError::InvalidTrim {
                         clip: *clip_id,
                         in_point: new_in.0,
@@ -207,7 +207,10 @@ impl Command {
                 let clip = project
                     .clip_mut(*clip_id)
                     .ok_or(CoreError::ClipNotFound(*clip_id))?;
-                if *new_in >= clip.out_point {
+                if *new_in < Timecode::ZERO
+                    || *new_position < Timecode::ZERO
+                    || *new_in >= clip.out_point
+                {
                     return Err(CoreError::InvalidTrim {
                         clip: *clip_id,
                         in_point: new_in.0,
@@ -441,5 +444,40 @@ mod tests {
         .apply(&mut project)
         .unwrap_err();
         assert_eq!(err, CoreError::InvalidSpeedRamp);
+    }
+
+    #[test]
+    fn tail_trim_updates_the_project_duration_to_the_new_clip_end() {
+        let (mut project, track_id) = project_with_track();
+        let clip_id = add_clip_at(&mut project, track_id, 2.0);
+        let clip = project.clip_mut(clip_id).unwrap();
+        clip.out_point = Timecode::from_seconds(10.0);
+        assert_eq!(project.duration(), Timecode::from_seconds(12.0));
+
+        Command::TrimClip {
+            clip_id,
+            new_in: Timecode::ZERO,
+            new_out: Timecode::from_seconds(3.0),
+        }
+        .apply(&mut project)
+        .unwrap();
+
+        assert_eq!(project.duration(), Timecode::from_seconds(5.0));
+    }
+
+    #[test]
+    fn clips_cannot_be_trimmed_before_the_start_of_the_source() {
+        let (mut project, track_id) = project_with_track();
+        let clip_id = add_clip_at(&mut project, track_id, 0.0);
+
+        let error = Command::TrimClip {
+            clip_id,
+            new_in: Timecode::from_seconds(-1.0),
+            new_out: Timecode::from_seconds(1.0),
+        }
+        .apply(&mut project)
+        .unwrap_err();
+
+        assert!(matches!(error, CoreError::InvalidTrim { .. }));
     }
 }
