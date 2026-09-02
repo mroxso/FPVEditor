@@ -205,6 +205,12 @@ function ProjectLauncher({
   openProject,
   createProject,
   appVersion,
+  updateCheck,
+  updateCheckError,
+  checkingUpdate,
+  downloadingUpdate,
+  checkForUpdates,
+  downloadUpdate,
 }: {
   recentProjects: RecentProject[];
   openRecent: (project: RecentProject) => Promise<void>;
@@ -212,6 +218,12 @@ function ProjectLauncher({
   openProject: () => Promise<void>;
   createProject: (name: string) => Promise<void>;
   appVersion: string;
+  updateCheck?: UpdateCheckResult;
+  updateCheckError?: string;
+  checkingUpdate: boolean;
+  downloadingUpdate: boolean;
+  checkForUpdates: () => Promise<void>;
+  downloadUpdate: () => Promise<void>;
 }) {
   const [name, setName] = useState("Untitled");
   return (
@@ -225,6 +237,42 @@ function ProjectLauncher({
           <p className="mb-3 text-xs font-medium uppercase tracking-[.14em] text-muted-foreground">New project</p>
           <div className="flex gap-2"><Input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createProject(name); }} placeholder="Project name" /><Button onClick={() => void createProject(name)}><Plus data-icon="inline-start" />Create</Button></div>
           <Button className="mt-3 w-full" variant="outline" onClick={() => void openProject()}><FolderOpen data-icon="inline-start" />Open project file</Button>
+          <Card size="sm" className="mt-7 shadow-none">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-sm">Software update</CardTitle>
+                  <CardDescription className="font-mono text-xs">Installed version {appVersion ? `v${appVersion}` : "…"}</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" disabled={checkingUpdate} onClick={() => void checkForUpdates()}>
+                  <RefreshCw data-icon="inline-start" className={checkingUpdate ? "animate-spin" : ""} />
+                  {checkingUpdate ? "Checking…" : "Check"}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0 text-xs">
+              {updateCheck?.update_available ? (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+                  <div>
+                    <p className="font-medium">Update available: v{updateCheck.latest_version}</p>
+                    {!updateCheck.download_url && <p className="mt-1 text-muted-foreground">No installer for this platform.</p>}
+                  </div>
+                  <Button size="sm" disabled={downloadingUpdate || !updateCheck.download_url} onClick={() => void downloadUpdate()}>
+                    <Download data-icon="inline-start" />
+                    {downloadingUpdate ? "Downloading…" : "Install"}
+                  </Button>
+                </div>
+              ) : updateCheckError ? (
+                <p className="text-muted-foreground">Update check unavailable. You can still open a project.</p>
+              ) : updateCheck ? (
+                <p className="text-muted-foreground">You're up to date.</p>
+              ) : checkingUpdate ? (
+                <p className="text-muted-foreground">Checking for updates…</p>
+              ) : (
+                <p className="text-muted-foreground">Check for updates to see your status.</p>
+              )}
+            </CardContent>
+          </Card>
           <Separator className="my-7" />
           <div className="mb-3 flex items-center justify-between"><p className="text-xs font-medium uppercase tracking-[.14em] text-muted-foreground">Recent projects</p><Badge variant="outline">{recentProjects.length}</Badge></div>
           {recentProjects.length ? <div className="space-y-1">{recentProjects.map((recent) => <div key={recent.path} className="flex items-center gap-1"><Button variant="ghost" className="h-auto min-w-0 flex-1 justify-start px-2 py-2" onClick={() => void openRecent(recent)}><Clapperboard data-icon="inline-start" /><span className="min-w-0 text-left"><span className="block truncate text-sm">{recent.name}</span><span className="block truncate font-mono text-[10px] text-muted-foreground">{recent.path}</span></span></Button><Button aria-label={`Remove ${recent.name} from recent projects`} variant="ghost" size="icon-sm" onClick={() => removeRecent(recent.path)}><Trash2 /></Button></div>)}</div> : <div className="rounded-lg border border-dashed p-5 text-center text-xs leading-5 text-muted-foreground">No recent projects yet. Create a project or open an existing <span className="font-mono">.fpv.json</span> file.</div>}
@@ -262,6 +310,7 @@ function App() {
   const [provider, setProvider] = useState(defaultProvider);
   const [appVersion, setAppVersion] = useState("");
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult>();
+  const [updateCheckError, setUpdateCheckError] = useState<string>();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
   const [mediaDiagnostics, setMediaDiagnostics] = useState<MediaDiagnostics>();
@@ -347,6 +396,7 @@ function App() {
   useEffect(() => { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); }, [preferences]);
   const checkForUpdates = useCallback(async (silent = false) => {
     setCheckingUpdate(true);
+    setUpdateCheckError(undefined);
     try {
       const result = await invoke<UpdateCheckResult>("check_for_updates");
       setUpdateCheck(result);
@@ -360,6 +410,7 @@ function App() {
         setNotice(`Update available: v${result.latest_version} — see Settings`);
       }
     } catch (error) {
+      setUpdateCheckError(String(error));
       if (!silent) setNotice(`Update check failed: ${String(error)}`);
     } finally {
       setCheckingUpdate(false);
@@ -599,7 +650,7 @@ function App() {
     setWorkspaceOpen(false);
     setReturnToOverviewOpen(false);
   };
-  if (!workspaceOpen) return <ProjectLauncher recentProjects={recentProjects} openRecent={openRecent} removeRecent={removeRecent} openProject={loadProject} createProject={createProject} appVersion={appVersion} />;
+  if (!workspaceOpen) return <ProjectLauncher recentProjects={recentProjects} openRecent={openRecent} removeRecent={removeRecent} openProject={loadProject} createProject={createProject} appVersion={appVersion} updateCheck={updateCheck} updateCheckError={updateCheckError} checkingUpdate={checkingUpdate} downloadingUpdate={downloadingUpdate} checkForUpdates={() => checkForUpdates(false)} downloadUpdate={downloadUpdate} />;
   const chat = async () => {
     if (!prompt.trim()) return;
     const text = prompt;
