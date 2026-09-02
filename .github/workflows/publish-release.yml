@@ -26,6 +26,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   desktop:
@@ -36,6 +37,12 @@ jobs:
 
   cli:
     uses: ./.github/workflows/publish-cli.yml
+    with:
+      tag: ${{ inputs.tag }}
+      source_ref: ${{ inputs.source_ref }}
+
+  docker:
+    uses: ./.github/workflows/publish-docker.yml
     with:
       tag: ${{ inputs.tag }}
       source_ref: ${{ inputs.source_ref }}

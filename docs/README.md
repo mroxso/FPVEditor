@@ -7,7 +7,7 @@ specific topic below.
 
 | Document | Covers |
 | --- | --- |
-| [Getting Started](getting-started.md) | Installing the desktop app, the CLI, or building from source; creating your first project |
+| [Getting Started](getting-started.md) | Installing the desktop app, the CLI, the CLI Docker image, or building from source; creating your first project |
 | [Architecture](architecture.md) | Workspace/crate layout, the command bus, data flow, the project file format |
 | [CLI Reference](cli-reference.md) | Every `fpv` subcommand, its flags, and examples |
 | [Stabilization](stabilization.md) | Gyro-based stabilization, horizon lock, rolling-shutter correction, lens distortion, dynamic FOV, and current limitations |

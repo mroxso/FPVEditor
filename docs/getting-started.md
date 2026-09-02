@@ -1,8 +1,9 @@
 # Getting Started
 
-FPV Editor is a native video editor for FPV drone pilots. This guide covers three ways
-to get it running: the pre-built desktop app, the standalone CLI, and building from
-source. See [docs/README.md](README.md) for the rest of the documentation set.
+FPV Editor is a native video editor for FPV drone pilots. This guide covers four ways
+to get it running: the pre-built desktop app, the standalone CLI, the CLI Docker image,
+and building from source. See [docs/README.md](README.md) for the rest of the
+documentation set.
 
 ## Option 1: Install the desktop app
 
@@ -69,7 +70,30 @@ another installation directory on macOS/Linux, set the `FPV_VERSION` or
 `FPV_INSTALL_DIR` environment variables before running the script. To uninstall, remove
 `fpv` from `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\FPVEditor\bin` on Windows.
 
-## Option 3: Build from source
+## Option 3: Run the CLI with Docker
+
+A self-contained image with `fpv`, FFmpeg, and FFprobe already installed is published to
+GHCR. No Rust, FFmpeg, or other local dependencies are needed.
+
+```sh
+docker pull ghcr.io/mroxso/fpveditor:latest
+docker run --rm ghcr.io/mroxso/fpveditor:latest --help
+```
+
+The entrypoint runs `fpv` directly, and the image's working directory is `/work`. Mount a
+local directory there to operate on your own project files:
+
+```sh
+docker run --rm -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
+  new project.fpv.json --name "My FPV Edit"
+docker run --rm -v "$(pwd)":/work ghcr.io/mroxso/fpveditor:latest \
+  export project.fpv.json --clip <clip-id> --output out.mp4
+```
+
+Images are tagged per release (for example `0.10.1`), and `latest` tracks the most
+recent release.
+
+## Option 4: Build from source
 
 Building from source is required if you want to develop FPV Editor, run the desktop app,
 or make changes to the CLI. You need:
