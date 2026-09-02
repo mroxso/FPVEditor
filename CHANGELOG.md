@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/mroxso/FPVEditor/compare/v0.8.0...v0.8.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* preserve timeline seek position ([#49](https://github.com/mroxso/FPVEditor/issues/49)) ([15708b8](https://github.com/mroxso/FPVEditor/commit/15708b8a5e9dfdec3e6c8c323f01b0f74d453407))
+
 ## [0.8.0](https://github.com/mroxso/FPVEditor/compare/v0.7.0...v0.8.0) (2026-09-02)
 
 
