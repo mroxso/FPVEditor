@@ -72,10 +72,14 @@ async fn import_media(
     app: AppHandle,
     state: State<'_, AppState>,
     paths: Vec<String>,
+    target_track_id: Option<fpv_core::TrackId>,
 ) -> AppResult<MediaImportOutcome> {
     let outcome = app_error(
         state
-            .import_media_paths(paths.into_iter().map(PathBuf::from).collect())
+            .import_media_paths(
+                paths.into_iter().map(PathBuf::from).collect(),
+                target_track_id,
+            )
             .await,
     )?;
     for path in &outcome.imported_paths {
