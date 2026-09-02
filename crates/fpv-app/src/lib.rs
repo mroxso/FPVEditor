@@ -15,6 +15,7 @@
 
 mod updates;
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,6 +33,7 @@ pub struct AppState {
     ai_config: Arc<Mutex<Option<ProviderConfig>>>,
     project_path: Arc<Mutex<Option<PathBuf>>>,
     preview_render_limit: Arc<Semaphore>,
+    preview_cache: Arc<Mutex<HashMap<(Option<String>, i64), PathBuf>>>,
 }
 
 impl Default for AppState {
@@ -65,6 +67,7 @@ impl AppState {
             ai_config: Arc::new(Mutex::new(None)),
             project_path: Arc::new(Mutex::new(None)),
             preview_render_limit: Arc::new(Semaphore::new(1)),
+            preview_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -74,6 +77,7 @@ impl AppState {
         let mut bus = self.bus.lock().await;
         *bus = CommandBus::new(project.clone());
         *self.project_path.lock().await = Some(path.to_path_buf());
+        self.clear_preview_cache().await;
         Ok(project)
     }
 
@@ -82,6 +86,7 @@ impl AppState {
         let project = Project::new(if name.trim().is_empty() { "Untitled" } else { &name });
         *self.bus.lock().await = CommandBus::new(project.clone());
         *self.project_path.lock().await = None;
+        self.clear_preview_cache().await;
         project
     }
 
@@ -103,6 +108,7 @@ impl AppState {
     pub async fn execute_command(&self, command: Command) -> Result<ExecuteOutcome> {
         let mut bus = self.bus.lock().await;
         bus.execute(command)?;
+        self.clear_preview_cache().await;
         Ok(ExecuteOutcome {
             project: bus.project().clone(),
             can_undo: bus.can_undo(),
@@ -113,6 +119,7 @@ impl AppState {
     pub async fn undo(&self) -> Result<ExecuteOutcome> {
         let mut bus = self.bus.lock().await;
         bus.undo()?;
+        self.clear_preview_cache().await;
         Ok(ExecuteOutcome {
             project: bus.project().clone(),
             can_undo: bus.can_undo(),
@@ -123,6 +130,7 @@ impl AppState {
     pub async fn redo(&self) -> Result<ExecuteOutcome> {
         let mut bus = self.bus.lock().await;
         bus.redo()?;
+        self.clear_preview_cache().await;
         Ok(ExecuteOutcome {
             project: bus.project().clone(),
             can_undo: bus.can_undo(),
@@ -211,6 +219,7 @@ impl AppState {
             next_position = Timecode(next_position.0 + duration_us);
             imported_paths.push(path);
         }
+        self.clear_preview_cache().await;
         Ok(MediaImportOutcome {
             project: bus.project().clone(),
             imported_paths,
@@ -231,7 +240,20 @@ impl AppState {
     /// Build a self-contained monitor rendition. Keeping this in the service
     /// layer ensures the desktop UI never has to guess how project effects
     /// should be applied.
-    pub async fn render_preview(&self, clip_id: Option<fpv_core::ClipId>) -> Result<PathBuf> {
+    pub async fn render_preview(
+        &self,
+        clip_id: Option<fpv_core::ClipId>,
+        start: Option<Timecode>,
+    ) -> Result<PathBuf> {
+        let cache_key = (
+            clip_id.map(|id| id.to_string()),
+            start.unwrap_or(Timecode::ZERO).0,
+        );
+        if let Some(path) = self.preview_cache.lock().await.get(&cache_key).cloned() {
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
         let project = self.bus.lock().await.project().clone();
         let root = std::env::temp_dir().join("fpv-editor-preview");
         fs::create_dir_all(&root).context("cannot create preview cache")?;
@@ -269,14 +291,33 @@ impl AppState {
                 )
                 .context("could not render clip preview")?;
             } else {
-                fpv_media::export_timeline_preview(&project, &rendered_path)
-                    .context("could not render timeline preview")?;
+                // The monitor needs only the next few seconds at the playhead;
+                // rendering the whole timeline here made import and editing
+                // increasingly slow as projects grew.
+                fpv_media::export_timeline_preview_range(
+                    &project,
+                    &rendered_path,
+                    start.unwrap_or(Timecode::ZERO),
+                    // Keep a meaningful amount ahead of the playhead so the
+                    // monitor has room to play while the next window is
+                    // prepared.
+                    Timecode::from_seconds(12.0),
+                )
+                .context("could not render timeline preview")?;
             }
             Ok(())
         })
         .await
         .context("preview renderer task stopped unexpectedly")??;
+        self.preview_cache
+            .lock()
+            .await
+            .insert(cache_key, output.clone());
         Ok(output)
+    }
+
+    async fn clear_preview_cache(&self) {
+        self.preview_cache.lock().await.clear();
     }
 
     /// PLAN.md section 4.1: configure the AI provider (base URL/key/model).

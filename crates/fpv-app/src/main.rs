@@ -86,8 +86,9 @@ async fn render_preview(
     app: AppHandle,
     state: State<'_, AppState>,
     clip_id: Option<fpv_core::ClipId>,
+    start: Option<fpv_core::Timecode>,
 ) -> AppResult<String> {
-    let path = app_error(state.render_preview(clip_id).await)?;
+    let path = app_error(state.render_preview(clip_id, start).await)?;
     app.asset_protocol_scope()
         .allow_file(&path)
         .map_err(|error| error.to_string())?;

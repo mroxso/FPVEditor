@@ -643,7 +643,9 @@ function App() {
           </aside>}
           <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px] bg-muted/30">
             {activePhase === "export" ? <ExportWorkspace project={project} selectedClip={selectedClip} saveProject={saveProject} /> : <Preview
+              project={project}
               selectedClip={selectedClip}
+              phase={activePhase}
               mode={previewMode}
               setMode={setPreviewMode}
               requestId={previewRequestId}
@@ -799,7 +801,9 @@ function ExportWorkspace({ project, selectedClip, saveProject }: { project: Proj
   return <section className="grid place-items-center p-8"><div className="w-full max-w-xl"><Badge variant="outline" className="mb-5 font-mono text-[10px] uppercase tracking-[.18em]">Final check</Badge><h1 className="font-heading text-2xl font-semibold">Ready to deliver?</h1><p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Review the project settings, save your edit, then render from the export pipeline.</p><div className="mt-7 grid grid-cols-3 gap-px overflow-hidden rounded-lg border bg-border"><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Clips</p><p className="mt-1 text-lg font-medium">{Object.keys(project.clips).length}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Format</p><p className="mt-1 text-lg font-medium">{project.width}×{project.height}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Frame rate</p><p className="mt-1 text-lg font-medium">{project.fps} fps</p></div></div><Card className="mt-5 shadow-none"><CardHeader><CardTitle className="text-sm">Desktop export</CardTitle><CardDescription className="text-xs">Save the project now. Final rendering is currently available through the project export pipeline; this workspace keeps delivery settings separate from the edit.</CardDescription></CardHeader><CardContent><Button onClick={() => void saveProject()}><Download data-icon="inline-start" />Save project</Button>{selectedClip && <p className="mt-3 text-xs text-muted-foreground">Selected clip: {fileName(selectedClip.source_path)}</p>}</CardContent></Card></div></section>;
 }
 function Preview({
+  project,
   selectedClip,
+  phase,
   mode,
   setMode,
   requestId,
@@ -809,7 +813,9 @@ function Preview({
   setPlayhead,
   setPlaying,
 }: {
+  project: Project;
   selectedClip?: Clip;
+  phase: WorkflowPhase;
   mode: PreviewMode;
   setMode: (mode: PreviewMode) => void;
   requestId: number;
@@ -823,17 +829,33 @@ function Preview({
   const [source, setSource] = useState<string>();
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string>();
+  const [previewStart, setPreviewStart] = useState(0);
+  const [bufferedEnd, setBufferedEnd] = useState(0);
+  const [mediaDuration, setMediaDuration] = useState(0);
   const selectedId = selectedClip?.id;
   useEffect(() => {
     let active = true;
-    // A selected clip is immediately playable while its effect-aware preview
-    // is prepared. This avoids a blank monitor during FFmpeg rendering.
+    // Imports should be instant: the original is already playable and we
+    // defer effect-aware rendering until the user enters an edit phase.
     setSource(mode === "clip" && selectedClip ? mediaSource(selectedClip.source_path) : undefined);
+    if (mode === "clip") {
+      setPreviewStart(0);
+      setBufferedEnd(0);
+      setMediaDuration(0);
+    }
     setError(undefined);
     if (mode === "clip" && !selectedId) return;
+    if (mode === "clip" && phase === "import") return;
+    // Tauri deserializes Timecode as an i64 microsecond value. Browser media
+    // events provide fractional milliseconds, so normalize before IPC.
+    const start = mode === "timeline" ? Math.round(playhead) : 0;
+    setPreviewStart(start);
+    setBufferedEnd(start);
+    setMediaDuration(0);
     setRendering(true);
     void invoke<string>("render_preview", {
       clipId: mode === "clip" ? selectedId : null,
+      start: mode === "timeline" ? start : null,
     })
       .then((path) => {
         if (active) setSource(mediaSource(path));
@@ -848,7 +870,7 @@ function Preview({
         if (active) setRendering(false);
       });
     return () => { active = false; };
-  }, [mode, requestId, selectedId, selectedClip]);
+  }, [mode, phase, requestId, selectedId, selectedClip]);
   useEffect(() => {
     const element = video.current;
     if (!element) return;
@@ -858,7 +880,7 @@ function Preview({
   useEffect(() => {
     const element = video.current;
     if (!element || !Number.isFinite(element.duration)) return;
-    const target = Math.min(element.duration, playhead / 1_000_000);
+    const target = Math.min(element.duration, (playhead - previewStart) / 1_000_000);
     // Native playback updates the shared playhead too. Only seek when the
     // difference is meaningful, otherwise normal playback would stutter.
     if (Math.abs(element.currentTime - target) > 0.04) element.currentTime = target;
@@ -866,11 +888,31 @@ function Preview({
   const seek = (next: number) => {
     const value = Math.max(0, Math.min(duration, next));
     setPlayhead(value);
-    if (video.current) video.current.currentTime = value / 1_000_000;
+    if (video.current) video.current.currentTime = (value - previewStart) / 1_000_000;
   };
   const seekToPlayhead = (element: HTMLVideoElement) => {
-    element.currentTime = Math.min(element.duration || 0, playhead / 1_000_000);
+    element.currentTime = Math.min(element.duration || 0, (playhead - previewStart) / 1_000_000);
   };
+  const updateBufferedRange = (element: HTMLVideoElement) => {
+    const ranges = element.buffered;
+    if (!ranges.length) return;
+    setBufferedEnd(previewStart + ranges.end(ranges.length - 1) * 1_000_000);
+  };
+  const activeClip = mode === "timeline"
+    ? Object.values(project.clips).find((clip) => playhead >= clip.position && playhead < clip.position + clip.out_point - clip.in_point) ?? selectedClip
+    : selectedClip;
+  const clipTime = activeClip
+    ? Math.max(0, playhead - activeClip.position + activeClip.in_point)
+    : 0;
+  // The bar intentionally represents the active preview window, not the full
+  // project. A 12-second buffer must remain legible in a 20-minute timeline.
+  const windowEnd = mode === "timeline"
+    ? Math.min(duration, previewStart + 12_000_000)
+    : previewStart + mediaDuration * 1_000_000;
+  const windowSpan = Math.max(1, windowEnd - previewStart);
+  const bufferProgress = Math.max(0, Math.min(100, ((bufferedEnd - previewStart) / windowSpan) * 100));
+  const playheadInWindow = Math.max(0, Math.min(100, ((playhead - previewStart) / windowSpan) * 100));
+  const bufferedSeconds = Math.max(0, (bufferedEnd - previewStart) / 1_000_000);
   return (
     <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px]">
       <div className="grid place-items-center p-6">
@@ -883,11 +925,19 @@ function Preview({
               ref={video}
               key={source}
               className="absolute inset-0 size-full bg-black object-contain"
-              controls
-              preload="metadata"
+              preload="auto"
               src={source}
-              onLoadedMetadata={(event) => seekToPlayhead(event.currentTarget)}
-              onTimeUpdate={(event) => setPlayhead(event.currentTarget.currentTime * 1_000_000)}
+              onLoadedMetadata={(event) => {
+                setMediaDuration(event.currentTarget.duration || 0);
+                seekToPlayhead(event.currentTarget);
+                updateBufferedRange(event.currentTarget);
+              }}
+              onCanPlay={(event) => updateBufferedRange(event.currentTarget)}
+              onProgress={(event) => updateBufferedRange(event.currentTarget)}
+              onTimeUpdate={(event) => {
+                updateBufferedRange(event.currentTarget);
+                setPlayhead(previewStart + event.currentTarget.currentTime * 1_000_000);
+              }}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
@@ -929,9 +979,23 @@ function Preview({
               </div>
             </div>
           )}
-          <div className="absolute bottom-3 left-4 right-4 flex justify-between font-mono text-[10px] text-muted-foreground">
-            <span>{timecode(playhead)}</span>
-            <span>{rendering ? "Rendering in background" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
+          <div className="absolute bottom-3 left-4 right-4 space-y-1.5 font-mono text-[10px] text-muted-foreground">
+            <div className="flex justify-between">
+              <span>{timecode(playhead)}</span>
+              <span>{rendering ? "Preparing buffer" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
+            </div>
+            {source && (
+              <>
+                <div className="relative h-1.5 overflow-hidden rounded-full border border-white/10 bg-black/45" aria-label={`${bufferedSeconds.toFixed(1)} seconds buffered`}>
+                  <div className="absolute inset-y-0 left-0 bg-emerald-400/85 transition-[width] duration-150" style={{ width: `${bufferProgress}%` }} />
+                  <div className="absolute -top-0.5 size-2.5 rounded-full border border-black/40 bg-white shadow" style={{ left: `calc(${playheadInWindow}% - 5px)` }} />
+                </div>
+                <div className="flex justify-between text-[9px] uppercase tracking-wider text-white/55">
+                  <span>{activeClip ? `${fileName(activeClip.source_path)} · source ${timecode(clipTime)}` : "Timeline"}</span>
+                  <span>{bufferedSeconds.toFixed(1)}s buffered · → {timecode(bufferedEnd)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
