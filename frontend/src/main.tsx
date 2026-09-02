@@ -748,7 +748,7 @@ function App() {
             </IconButton>
           </div>
         </header>
-        {exporting && <Button className="fixed right-5 top-[72px] z-50" variant="destructive" size="sm" onClick={() => void invoke("cancel_export")}>Cancel render</Button>}
+        {exporting && <Button className="fixed bottom-10 left-1/2 z-50 -translate-x-1/2" variant="destructive" size="sm" onClick={() => void invoke("cancel_export")}>Cancel render</Button>}
         <div className="phase-toolbar border-b">
           <div><span className="font-mono text-[10px] uppercase tracking-[.14em] text-muted-foreground">{activeWorkflowPhase.eyebrow}</span><span className="phase-description">{activeWorkflowPhase.description}</span></div>
           <div className="workflow-actions">
