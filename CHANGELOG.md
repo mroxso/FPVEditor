@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/mroxso/FPVEditor/compare/v0.7.0...v0.8.0) (2026-09-02)
+
+
+### Features
+
+* improve import media previews ([#45](https://github.com/mroxso/FPVEditor/issues/45)) ([9676555](https://github.com/mroxso/FPVEditor/commit/9676555d051c15eb490724cdad6d50ca18d73ffd))
+* show FFmpeg diagnostics in settings ([#39](https://github.com/mroxso/FPVEditor/issues/39)) ([2305b5b](https://github.com/mroxso/FPVEditor/commit/2305b5bd83b8c8b513094398da999e7409f5c0ba))
+
+
+### Bug Fixes
+
+* preserve the video track targeted by file drops ([#47](https://github.com/mroxso/FPVEditor/issues/47)) ([124189f](https://github.com/mroxso/FPVEditor/commit/124189f9bb964a27f48048dc97012847bc54094c))
+* show current app version on project overview ([#43](https://github.com/mroxso/FPVEditor/issues/43)) ([6a8c777](https://github.com/mroxso/FPVEditor/commit/6a8c77710904b2998090a1a7c4053fc3203047ea))
+
 ## [0.7.0](https://github.com/mroxso/FPVEditor/compare/v0.6.1...v0.7.0) (2026-09-02)
 
 
