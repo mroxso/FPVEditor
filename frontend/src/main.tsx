@@ -112,7 +112,8 @@ type Provider = {
   model: string;
   extra_headers: Record<string, string>;
 };
-type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number; autoCheckUpdates: boolean };
+type TimelineGrid = "off" | "coarse" | "medium" | "fine";
+type EditorPreferences = { mediaOpen: boolean; inspectorOpen: boolean; copilotOpen: boolean; timelineHeight: number; autoCheckUpdates: boolean; timelineGrid: TimelineGrid };
 type RecentProject = { path: string; name: string; openedAt: number };
 type UpdateCheckResult = {
   current_version: string;
@@ -142,7 +143,7 @@ const workflowPhases: {
 ];
 const preferencesKey = "fpv-editor-preferences";
 const recentProjectsKey = "fpv-editor-recent-projects";
-const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220, autoCheckUpdates: true };
+const defaultPreferences: EditorPreferences = { mediaOpen: true, inspectorOpen: true, copilotOpen: true, timelineHeight: 220, autoCheckUpdates: true, timelineGrid: "medium" };
 const readLocal = <T,>(key: string, fallback: T): T => {
   try { return JSON.parse(localStorage.getItem(key) ?? "") as T; } catch { return fallback; }
 };
@@ -239,7 +240,7 @@ function App() {
   const [redoable, setRedoable] = useState(false);
   const [notice, setNotice] = useState("Ready to edit");
   const [dragActive, setDragActive] = useState(false);
-  const { copilotOpen, mediaOpen, inspectorOpen, timelineHeight } = preferences;
+  const { copilotOpen, mediaOpen, inspectorOpen, timelineHeight, timelineGrid } = preferences;
   const setPreference = <K extends keyof EditorPreferences>(key: K, value: EditorPreferences[K]) =>
     setPreferences((current) => ({ ...current, [key]: value }));
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -718,6 +719,7 @@ function App() {
           onAddTrack={addTrack}
           height={timelineHeight}
           setHeight={(height) => setPreference("timelineHeight", height)}
+          grid={timelineGrid}
         />}
         <SettingsDialog
           open={settingsOpen}
@@ -729,6 +731,8 @@ function App() {
           appVersion={appVersion}
           autoCheckUpdates={preferences.autoCheckUpdates}
           setAutoCheckUpdates={(value) => setPreference("autoCheckUpdates", value)}
+          timelineGrid={timelineGrid}
+          setTimelineGrid={(value) => setPreference("timelineGrid", value)}
           updateCheck={updateCheck}
           checkingUpdate={checkingUpdate}
           downloadingUpdate={downloadingUpdate}
@@ -1298,6 +1302,7 @@ function Timeline({
   onAddTrack,
   height,
   setHeight,
+  grid,
 }: {
   project: Project;
   selected?: string;
@@ -1316,6 +1321,7 @@ function Timeline({
   onAddTrack: (kind: TrackKind) => Promise<Outcome | undefined>;
   height: number;
   setHeight: (height: number) => void;
+  grid: TimelineGrid;
 }) {
   const [draggingClip, setDraggingClip] = useState<{ id: string; position: number; trackId: string }>();
   const rulerTicks = useMemo(() => {
@@ -1426,7 +1432,7 @@ function Timeline({
     event.currentTarget.addEventListener("pointerup", finish, { once: true });
   };
   return (
-    <section className={`timeline-editor relative overflow-hidden border-t bg-card ${tool === "razor" ? "is-razor" : "is-select"}`} style={{ height }}>
+    <section className={`timeline-editor timeline-grid-${grid} relative overflow-hidden border-t bg-card ${tool === "razor" ? "is-razor" : "is-select"}`} style={{ height }}>
       <button aria-label="Resize timeline" className="timeline-resize-handle" onPointerDown={resize}>
         <GripHorizontal />
       </button>
@@ -1591,6 +1597,8 @@ function SettingsDialog({
   appVersion,
   autoCheckUpdates,
   setAutoCheckUpdates,
+  timelineGrid,
+  setTimelineGrid,
   updateCheck,
   checkingUpdate,
   downloadingUpdate,
@@ -1606,6 +1614,8 @@ function SettingsDialog({
   appVersion: string;
   autoCheckUpdates: boolean;
   setAutoCheckUpdates: (value: boolean) => void;
+  timelineGrid: TimelineGrid;
+  setTimelineGrid: (value: TimelineGrid) => void;
   updateCheck?: UpdateCheckResult;
   checkingUpdate: boolean;
   downloadingUpdate: boolean;
@@ -1631,6 +1641,31 @@ function SettingsDialog({
             <TabsTrigger value="info">Info</TabsTrigger>
           </TabsList>
           <TabsContent value="general" className="mt-4 space-y-3">
+            <Card size="sm" className="shadow-none">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Timeline grid</CardTitle>
+                <CardDescription className="text-xs">Choose how much visual guidance appears behind clips and in the ruler.</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <ToggleGroup
+                  type="single"
+                  value={timelineGrid}
+                  onValueChange={(value) => {
+                    if (value) setTimelineGrid(value as TimelineGrid);
+                  }}
+                  variant="outline"
+                  size="sm"
+                  spacing={0}
+                  aria-label="Timeline grid density"
+                  className="w-full"
+                >
+                  <ToggleGroupItem value="off" className="flex-1 text-xs">Off</ToggleGroupItem>
+                  <ToggleGroupItem value="coarse" className="flex-1 text-xs">Coarse</ToggleGroupItem>
+                  <ToggleGroupItem value="medium" className="flex-1 text-xs">Medium</ToggleGroupItem>
+                  <ToggleGroupItem value="fine" className="flex-1 text-xs">Fine</ToggleGroupItem>
+                </ToggleGroup>
+              </CardContent>
+            </Card>
             <Card size="sm" className="shadow-none">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Preview processing</CardTitle>
