@@ -841,7 +841,9 @@ function Preview({
     setError(undefined);
     if (mode === "clip" && !selectedId) return;
     if (mode === "clip" && phase === "import") return;
-    const start = mode === "timeline" ? playhead : 0;
+    // Tauri deserializes Timecode as an i64 microsecond value. Browser media
+    // events provide fractional milliseconds, so normalize before IPC.
+    const start = mode === "timeline" ? Math.round(playhead) : 0;
     setPreviewStart(start);
     setBufferedEnd(start);
     setRendering(true);
