@@ -89,14 +89,71 @@ jobs:
             crates/fpv-app/target/**/bundle/*/*.msi
           if-no-files-found: error
 
+  build-cli:
+    name: Build CLI ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS ARM64
+            os: macos-14
+            asset: macos-arm64
+            archive: tar.gz
+          - name: macOS x64
+            os: macos-13
+            asset: macos-x64
+            archive: tar.gz
+          - name: Windows x64
+            os: windows-latest
+            asset: windows-x64
+            archive: zip
+          - name: Linux x64
+            os: ubuntu-22.04
+            asset: linux-x64
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || inputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build CLI
+        run: cargo build --release -p fpv-cli
+      - name: Verify CLI
+        shell: bash
+        run: cargo run --release -p fpv-cli -- --help
+      - name: Package CLI (macOS and Linux)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          mkdir dist
+          tar -C target/release -czf "dist/fpv-cli-${{ matrix.asset }}.tar.gz" fpv
+      - name: Package CLI (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Compress-Archive -Path target/release/fpv.exe -DestinationPath "dist/fpv-cli-${{ matrix.asset }}.zip"
+      - name: Upload CLI release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: fpv-cli-${{ matrix.asset }}
+          path: dist/fpv-cli-${{ matrix.asset }}.${{ matrix.archive }}
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, build-cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
+      - name: Generate CLI checksums
+        shell: bash
+        run: |
+          cd release-assets
+          find . -maxdepth 1 -type f -name 'fpv-cli-*' -printf '%f\0' | sort -z | xargs -0 sha256sum > fpv-cli-checksums.txt
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
