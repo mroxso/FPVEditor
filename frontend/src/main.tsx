@@ -201,19 +201,21 @@ function IconButton({
 function ProjectLauncher({
   recentProjects,
   openRecent,
+  removeRecent,
   openProject,
   createProject,
 }: {
   recentProjects: RecentProject[];
   openRecent: (project: RecentProject) => Promise<void>;
+  removeRecent: (path: string) => void;
   openProject: () => Promise<void>;
   createProject: (name: string) => Promise<void>;
 }) {
   const [name, setName] = useState("Untitled");
   return (
-    <main className="grid min-h-screen place-items-center bg-background p-8 text-foreground">
+    <main className="grid min-h-screen place-items-center bg-background p-4 text-foreground sm:p-8">
       <section className="grid w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-2xl md:grid-cols-[1fr_1.25fr]">
-        <div className="flex min-h-[440px] flex-col justify-between border-r bg-muted/30 p-8">
+        <div className="flex min-h-[440px] flex-col justify-between border-b bg-muted/30 p-8 md:border-b-0 md:border-r">
           <div><img className="mb-5 size-10" src={fpvEditorLogo} alt="FPV Editor" /><p className="font-heading text-xl font-semibold">FPV Editor</p><p className="mt-2 max-w-xs text-sm leading-6 text-muted-foreground">Start a new cut or pick up where your last flight left off.</p></div>
           <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">Desktop cut suite · v0.1.0</p>
         </div>
@@ -223,7 +225,7 @@ function ProjectLauncher({
           <Button className="mt-3 w-full" variant="outline" onClick={() => void openProject()}><FolderOpen data-icon="inline-start" />Open project file</Button>
           <Separator className="my-7" />
           <div className="mb-3 flex items-center justify-between"><p className="text-xs font-medium uppercase tracking-[.14em] text-muted-foreground">Recent projects</p><Badge variant="outline">{recentProjects.length}</Badge></div>
-          {recentProjects.length ? <div className="space-y-1">{recentProjects.map((recent) => <Button key={recent.path} variant="ghost" className="h-auto w-full justify-start px-2 py-2" onClick={() => void openRecent(recent)}><Clapperboard data-icon="inline-start" /><span className="min-w-0 text-left"><span className="block truncate text-sm">{recent.name}</span><span className="block truncate font-mono text-[10px] text-muted-foreground">{recent.path}</span></span></Button>)}</div> : <div className="rounded-lg border border-dashed p-5 text-center text-xs leading-5 text-muted-foreground">No recent projects yet. Create a project or open an existing <span className="font-mono">.fpv.json</span> file.</div>}
+          {recentProjects.length ? <div className="space-y-1">{recentProjects.map((recent) => <div key={recent.path} className="flex items-center gap-1"><Button variant="ghost" className="h-auto min-w-0 flex-1 justify-start px-2 py-2" onClick={() => void openRecent(recent)}><Clapperboard data-icon="inline-start" /><span className="min-w-0 text-left"><span className="block truncate text-sm">{recent.name}</span><span className="block truncate font-mono text-[10px] text-muted-foreground">{recent.path}</span></span></Button><Button aria-label={`Remove ${recent.name} from recent projects`} variant="ghost" size="icon-sm" onClick={() => removeRecent(recent.path)}><Trash2 /></Button></div>)}</div> : <div className="rounded-lg border border-dashed p-5 text-center text-xs leading-5 text-muted-foreground">No recent projects yet. Create a project or open an existing <span className="font-mono">.fpv.json</span> file.</div>}
         </div>
       </section>
     </main>
@@ -238,6 +240,7 @@ function App() {
   }));
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => readLocal(recentProjectsKey, [] as RecentProject[]));
   const [project, setProject] = useState<Project>(seedProject);
+  const [savedProject, setSavedProject] = useState(() => JSON.stringify(seedProject));
   const [selected, setSelected] = useState<string>();
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -253,6 +256,7 @@ function App() {
   const setPreference = <K extends keyof EditorPreferences>(key: K, value: EditorPreferences[K]) =>
     setPreferences((current) => ({ ...current, [key]: value }));
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [returnToOverviewOpen, setReturnToOverviewOpen] = useState(false);
   const [provider, setProvider] = useState(defaultProvider);
   const [appVersion, setAppVersion] = useState("");
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult>();
@@ -274,6 +278,7 @@ function App() {
   const showMedia = activePhase !== "export";
   const showInspector = activePhase === "stabilize" || activePhase === "cut" || activePhase === "grade";
   const showCopilot = activePhase === "cut" && copilotOpen;
+  const hasUnsavedChanges = JSON.stringify(project) !== savedProject;
   const duration = useMemo(
     () =>
       Math.max(
@@ -390,6 +395,13 @@ function App() {
   const rememberProject = (path: string, name: string) => {
     setRecentProjects((current) => {
       const next = [{ path, name, openedAt: Date.now() }, ...current.filter((item) => item.path !== path)].slice(0, 8);
+      localStorage.setItem(recentProjectsKey, JSON.stringify(next));
+      return next;
+    });
+  };
+  const removeRecent = (path: string) => {
+    setRecentProjects((current) => {
+      const next = current.filter((item) => item.path !== path);
       localStorage.setItem(recentProjectsKey, JSON.stringify(next));
       return next;
     });
@@ -518,11 +530,14 @@ function App() {
       if (path) {
         await invoke("save_project", { path });
         rememberProject(path, project.name);
+        setSavedProject(JSON.stringify(project));
         setNotice("Project saved");
+        return true;
       }
     } catch (error) {
       setNotice(`Save failed: ${String(error)}`);
     }
+    return false;
   };
   const loadProject = async () => {
     try {
@@ -533,6 +548,7 @@ function App() {
       if (typeof path === "string") {
         const loaded = await invoke<Project>("load_project", { path });
         setProject(loaded);
+        setSavedProject(JSON.stringify(loaded));
         setSelected(undefined);
         rememberProject(path, loaded.name);
         setWorkspaceOpen(true);
@@ -559,13 +575,19 @@ function App() {
   const openRecent = async (recent: RecentProject) => {
     try {
       const loaded = await invoke<Project>("load_project", { path: recent.path });
-      setProject(loaded); setSelected(undefined); rememberProject(recent.path, loaded.name); setWorkspaceOpen(true);
+      setProject(loaded); setSavedProject(JSON.stringify(loaded)); setSelected(undefined); rememberProject(recent.path, loaded.name); setWorkspaceOpen(true);
     } catch (error) { setNotice(`Open failed: ${String(error)}`); }
   };
   const createProject = async (name: string) => {
-    try { setProject(await invoke<Project>("new_project", { name })); setSelected(undefined); setWorkspaceOpen(true); } catch (error) { setNotice(`New project failed: ${String(error)}`); }
+    try { const created = await invoke<Project>("new_project", { name }); setProject(created); setSavedProject(JSON.stringify(created)); setSelected(undefined); setWorkspaceOpen(true); } catch (error) { setNotice(`New project failed: ${String(error)}`); }
   };
-  if (!workspaceOpen) return <ProjectLauncher recentProjects={recentProjects} openRecent={openRecent} openProject={loadProject} createProject={createProject} />;
+  const returnToOverview = () => {
+    setPlaying(false);
+    setSelected(undefined);
+    setWorkspaceOpen(false);
+    setReturnToOverviewOpen(false);
+  };
+  if (!workspaceOpen) return <ProjectLauncher recentProjects={recentProjects} openRecent={openRecent} removeRecent={removeRecent} openProject={loadProject} createProject={createProject} />;
   const chat = async () => {
     if (!prompt.trim()) return;
     const text = prompt;
@@ -613,6 +635,14 @@ function App() {
             <span className="text-xs text-muted-foreground">{project.width} × {project.height} · {project.fps} fps</span>
           </div>
           <div className="flex items-center justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => hasUnsavedChanges ? setReturnToOverviewOpen(true) : returnToOverview()}
+            >
+              <ChevronLeft data-icon="inline-start" />
+              Projects
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -747,6 +777,7 @@ function App() {
           setOpen={setSettingsOpen}
           provider={provider}
           project={project}
+          notice={notice}
           setProvider={setProvider}
           saveProvider={saveProvider}
           appVersion={appVersion}
@@ -763,6 +794,21 @@ function App() {
           checkingMediaDiagnostics={checkingMediaDiagnostics}
           checkMediaDiagnostics={checkMediaDiagnostics}
         />
+        <Dialog open={returnToOverviewOpen} onOpenChange={setReturnToOverviewOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Unsaved changes</DialogTitle>
+              <DialogDescription>
+                Save your changes before returning to the project overview, or discard them.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setReturnToOverviewOpen(false)}>Cancel</Button>
+              <Button variant="destructive" onClick={returnToOverview}>Discard changes</Button>
+              <Button onClick={() => void saveProject().then((saved) => { if (saved) returnToOverview(); })}>Save and return</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         {dragActive && (
           <div className="pointer-events-none absolute inset-3 grid place-items-center rounded-xl border-2 border-dashed bg-background/90">
             <div className="flex flex-col items-center gap-3 text-center">
@@ -848,7 +894,7 @@ function EmptyInspector() {
     </div>
   );
 }
-function ExportWorkspace({ project, selectedClip, saveProject }: { project: Project; selectedClip?: Clip; saveProject: () => Promise<void> }) {
+function ExportWorkspace({ project, selectedClip, saveProject }: { project: Project; selectedClip?: Clip; saveProject: () => Promise<boolean> }) {
   return <section className="grid place-items-center p-8"><div className="w-full max-w-xl"><Badge variant="outline" className="mb-5 font-mono text-[10px] uppercase tracking-[.18em]">Final check</Badge><h1 className="font-heading text-2xl font-semibold">Ready to deliver?</h1><p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Review the project settings, save your edit, then render from the export pipeline.</p><div className="mt-7 grid grid-cols-3 gap-px overflow-hidden rounded-lg border bg-border"><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Clips</p><p className="mt-1 text-lg font-medium">{Object.keys(project.clips).length}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Format</p><p className="mt-1 text-lg font-medium">{project.width}×{project.height}</p></div><div className="bg-card p-4"><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Frame rate</p><p className="mt-1 text-lg font-medium">{project.fps} fps</p></div></div><Card className="mt-5 shadow-none"><CardHeader><CardTitle className="text-sm">Desktop export</CardTitle><CardDescription className="text-xs">Save the project now. Final rendering is currently available through the project export pipeline; this workspace keeps delivery settings separate from the edit.</CardDescription></CardHeader><CardContent><Button onClick={() => void saveProject()}><Download data-icon="inline-start" />Save project</Button>{selectedClip && <p className="mt-3 text-xs text-muted-foreground">Selected clip: {fileName(selectedClip.source_path)}</p>}</CardContent></Card></div></section>;
 }
 function Preview({
@@ -1348,6 +1394,7 @@ function Timeline({
   grid: TimelineGrid;
 }) {
   const [draggingClip, setDraggingClip] = useState<{ id: string; position: number; trackId: string }>();
+  const [razorPosition, setRazorPosition] = useState<number>();
   const rulerTicks = useMemo(() => {
     const totalSeconds = Math.max(0.001, duration / 1_000_000);
     const targetStep = totalSeconds / 6;
@@ -1456,7 +1503,11 @@ function Timeline({
     event.currentTarget.addEventListener("pointerup", finish, { once: true });
   };
   return (
-    <section className={`timeline-editor timeline-grid-${grid} relative overflow-hidden border-t bg-card ${tool === "razor" ? "is-razor" : "is-select"}`} style={{ height }}>
+    <section
+      className={`timeline-editor timeline-grid-${grid} relative overflow-hidden border-t bg-card ${tool === "razor" ? "is-razor" : "is-select"}`}
+      style={{ height }}
+      onPointerLeave={() => setRazorPosition(undefined)}
+    >
       <button aria-label="Resize timeline" className="timeline-resize-handle" onPointerDown={resize}>
         <GripHorizontal />
       </button>
@@ -1519,7 +1570,11 @@ function Timeline({
       </div>
       <div className="grid h-10 grid-cols-[148px_minmax(0,1fr)] border-b">
         <div className="border-r" />
-        <div className="timeline-ruler relative" onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}>
+        <div
+          className="timeline-ruler relative"
+          onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}
+          onPointerMove={(event) => tool === "razor" && setRazorPosition(timeAtPointer(event, event.currentTarget))}
+        >
           {rulerTicks.map((tick) => (
             <span
               key={tick}
@@ -1552,9 +1607,14 @@ function Timeline({
                 {track.kind}
               </p>
             </div>
-            <div className="timeline-lane relative" data-timeline-lane onPointerDown={(event) => {
-              if (event.target === event.currentTarget) setPlayhead(timeAtPointer(event, event.currentTarget));
-            }}>
+            <div
+              className="timeline-lane relative"
+              data-timeline-lane
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) setPlayhead(timeAtPointer(event, event.currentTarget));
+              }}
+              onPointerMove={(event) => tool === "razor" && setRazorPosition(timeAtPointer(event, event.currentTarget))}
+            >
               {(draggingClip?.trackId === track.id && !track.clip_order.includes(draggingClip.id)
                 ? [...track.clip_order, draggingClip.id]
                 : track.clip_order
@@ -1597,6 +1657,12 @@ function Timeline({
         ))}
       </div>
       <div className="pointer-events-none absolute bottom-0 left-[148px] right-0 top-[52px] z-10">
+        {tool === "razor" && razorPosition !== undefined && (
+          <div
+            className="timeline-razor-marker absolute bottom-0 top-0"
+            style={{ left: `${(razorPosition / duration) * 100}%` }}
+          />
+        )}
         <div
           className="timeline-playhead-line absolute bottom-0 top-0"
           style={{ left: `${(playhead / duration) * 100}%` }}
@@ -1616,6 +1682,7 @@ function SettingsDialog({
   setOpen,
   provider,
   project,
+  notice,
   setProvider,
   saveProvider,
   appVersion,
@@ -1636,6 +1703,7 @@ function SettingsDialog({
   setOpen: (value: boolean) => void;
   provider: Provider;
   project: Project;
+  notice: string;
   setProvider: (value: Provider) => void;
   saveProvider: (test?: boolean) => Promise<void>;
   appVersion: string;
@@ -1657,6 +1725,12 @@ function SettingsDialog({
   useEffect(() => {
     if (open && !mediaDiagnostics && !checkingMediaDiagnostics) void checkMediaDiagnostics();
   }, [open, mediaDiagnostics, checkingMediaDiagnostics, checkMediaDiagnostics]);
+  const connectionNotice =
+    notice === "Testing AI connection…" ||
+    notice === "AI provider connected" ||
+    notice.startsWith("AI connection failed:")
+      ? notice
+      : undefined;
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
@@ -1726,6 +1800,17 @@ function SettingsDialog({
               <Label htmlFor="provider-api-key">API key <span className="font-normal text-muted-foreground">(optional)</span></Label>
               <Input id="provider-api-key" type="password" value={provider.api_key ?? ""} onChange={(event) => set("api_key", event.target.value || null)} placeholder="sk-…" />
             </div>
+            <Button variant="outline" className="w-full" onClick={() => void saveProvider(true)}>
+              Test connection
+            </Button>
+            {connectionNotice && (
+              <p
+                role="status"
+                className={`text-xs ${connectionNotice.startsWith("AI connection failed:") ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                {connectionNotice}
+              </p>
+            )}
           </TabsContent>
           <TabsContent value="media" className="mt-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -1839,9 +1924,6 @@ function SettingsDialog({
           </TabsContent>
         </Tabs>
         <DialogFooter>
-          <Button variant="outline" onClick={() => void saveProvider(true)}>
-            Test connection
-          </Button>
           <Button
             onClick={() => {
               void saveProvider();
