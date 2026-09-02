@@ -9,6 +9,7 @@
 <p align="center">
   <a href="#getting-started">Get started</a> ·
   <a href="#features">Features</a> ·
+  <a href="docs/README.md">Docs</a> ·
   <a href="#contributing">Contributing</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
@@ -189,6 +190,9 @@ The workspace is organized around a shared Rust core:
 | `fpv-stabilize` / `fpv-gpu` | Stabilization and image-processing primitives |
 | `fpv-ai` / `fpv-mcp` | AI tool catalog and MCP server |
 | `fpv-cli` / `fpv-app` | Headless and desktop entry points |
+
+See the [docs](docs/README.md) for the full documentation set, including a CLI reference,
+stabilization details, AI/MCP integration, and the frontend architecture.
 
 ## Contributing
 
