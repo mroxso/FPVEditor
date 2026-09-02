@@ -1017,6 +1017,9 @@ function Preview({
   const [previewStart, setPreviewStart] = useState(0);
   const [bufferedEnd, setBufferedEnd] = useState(0);
   const [mediaDuration, setMediaDuration] = useState(0);
+  const [timelineRenderVersion, setTimelineRenderVersion] = useState(0);
+  const requestedTimelineStart = useRef<number | undefined>(undefined);
+  const playheadUpdatedByPlayback = useRef(false);
   const selectedId = selectedClip?.id;
   useEffect(() => {
     let active = true;
@@ -1033,7 +1036,10 @@ function Preview({
     if (mode === "clip" && phase === "import") return;
     // Tauri deserializes Timecode as an i64 microsecond value. Browser media
     // events provide fractional milliseconds, so normalize before IPC.
-    const start = mode === "timeline" ? Math.round(playhead) : 0;
+    const start = mode === "timeline"
+      ? requestedTimelineStart.current ?? Math.round(playhead)
+      : 0;
+    requestedTimelineStart.current = undefined;
     setPreviewStart(start);
     setBufferedEnd(start);
     setMediaDuration(0);
@@ -1055,7 +1061,7 @@ function Preview({
         if (active) setRendering(false);
       });
     return () => { active = false; };
-  }, [mode, phase, requestId, selectedId, selectedClip]);
+  }, [mode, phase, requestId, selectedId, selectedClip, timelineRenderVersion]);
   useEffect(() => {
     const element = video.current;
     if (!element) return;
@@ -1065,15 +1071,34 @@ function Preview({
   useEffect(() => {
     const element = video.current;
     if (!element || !Number.isFinite(element.duration)) return;
-    const target = Math.min(element.duration, (playhead - previewStart) / 1_000_000);
+    const target = (playhead - previewStart) / 1_000_000;
+    // A timeline preview is a bounded window. Never clamp an out-of-window
+    // seek to this video's start/end: its timeupdate would overwrite the
+    // requested timeline position with that stale boundary.
+    if (target < 0 || target > element.duration) return;
     // Native playback updates the shared playhead too. Only seek when the
     // difference is meaningful, otherwise normal playback would stutter.
     if (Math.abs(element.currentTime - target) > 0.04) element.currentTime = target;
   }, [playhead, source]);
+  useEffect(() => {
+    if (mode !== "timeline" || !source || mediaDuration <= 0) return;
+    if (playheadUpdatedByPlayback.current) {
+      playheadUpdatedByPlayback.current = false;
+      return;
+    }
+    const previewEnd = previewStart + mediaDuration * 1_000_000;
+    if (playhead < previewStart || playhead > previewEnd) {
+      // Seeking beyond the currently rendered range requires a new monitor
+      // window. Pause until it is ready so the obsolete source cannot move
+      // the shared playhead back to its own boundary.
+      requestedTimelineStart.current = Math.round(playhead);
+      setPlaying(false);
+      setTimelineRenderVersion((current) => current + 1);
+    }
+  }, [mediaDuration, mode, playhead, previewStart, setPlaying, source]);
   const seek = (next: number) => {
     const value = Math.max(0, Math.min(duration, next));
     setPlayhead(value);
-    if (video.current) video.current.currentTime = (value - previewStart) / 1_000_000;
   };
   const seekToPlayhead = (element: HTMLVideoElement) => {
     element.currentTime = Math.min(element.duration || 0, (playhead - previewStart) / 1_000_000);
@@ -1121,6 +1146,7 @@ function Preview({
               onProgress={(event) => updateBufferedRange(event.currentTarget)}
               onTimeUpdate={(event) => {
                 updateBufferedRange(event.currentTarget);
+                playheadUpdatedByPlayback.current = !event.currentTarget.paused;
                 setPlayhead(previewStart + event.currentTarget.currentTime * 1_000_000);
               }}
               onPlay={() => setPlaying(true)}
