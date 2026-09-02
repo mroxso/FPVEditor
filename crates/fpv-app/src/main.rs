@@ -63,6 +63,14 @@ fn probe_media(state: State<'_, AppState>, path: String) -> AppResult<fpv_media:
 }
 
 #[tauri::command]
+fn probe_gyro_trace(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<Option<fpv_media::GyroTrace>> {
+    app_error(state.probe_gyro_trace(&PathBuf::from(path)))
+}
+
+#[tauri::command]
 async fn import_media(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -147,6 +155,7 @@ fn main() {
             new_project,
             save_project,
             probe_media,
+            probe_gyro_trace,
             import_media,
             render_preview,
             configure_ai,

@@ -18,6 +18,23 @@ pub struct MediaInfo {
     pub has_audio: bool,
 }
 
+/// A downsampled gyroscope trace suitable for a lightweight timeline display.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GyroTrace {
+    /// One [X, Y, Z] angular-velocity sample per point.
+    pub samples: Vec<[f32; 3]>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FfprobePackets {
+    packets: Vec<FfprobePacket>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FfprobePacket {
+    data: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct FfprobeOutput {
     format: FfprobeFormat,
@@ -109,6 +126,109 @@ pub fn probe(path: &Path) -> MediaResult<MediaInfo> {
     parse_ffprobe_json(&stdout)
 }
 
+/// Read GoPro's GPMF `GYRO` metadata from the file's data track when present.
+///
+/// FFmpeg exposes the raw GPMF packets but does not decode them itself. The
+/// parser below extracts the nested `GYRO` samples and their `SCAL` factor,
+/// then limits the result to a practical number of timeline points. Formats
+/// without GPMF are deliberately reported as `None` rather than as an error.
+pub fn probe_gyro_trace(path: &Path) -> MediaResult<Option<GyroTrace>> {
+    if !process::is_available("ffprobe") {
+        return Err(MediaError::BinaryNotFound("ffprobe".to_string()));
+    }
+    let args = vec![
+        "-v".into(),
+        "error".into(),
+        "-select_streams".into(),
+        "d".into(),
+        "-show_packets".into(),
+        "-show_data".into(),
+        "-show_entries".into(),
+        "packet=data".into(),
+        "-of".into(),
+        "json".into(),
+        path.to_string_lossy().to_string(),
+    ];
+    let stdout = process::run_capture_stdout("ffprobe", &args)?;
+    Ok(parse_gyro_packets_json(&stdout))
+}
+
+fn parse_gyro_packets_json(json: &str) -> Option<GyroTrace> {
+    let packets: FfprobePackets = serde_json::from_str(json).ok()?;
+    let mut samples = Vec::new();
+    for packet in packets.packets {
+        let bytes = decode_ffprobe_hex(packet.data.as_deref()?);
+        extract_gpmf_gyro(&bytes, 1.0, &mut samples);
+    }
+    if samples.is_empty() {
+        return None;
+    }
+    // Keeping this bounded makes a large action-camera file cheap to send to
+    // the UI while preserving its overall movement profile.
+    const MAX_POINTS: usize = 160;
+    let stride = samples.len().div_ceil(MAX_POINTS);
+    Some(GyroTrace {
+        samples: samples.into_iter().step_by(stride).collect(),
+    })
+}
+
+fn decode_ffprobe_hex(data: &str) -> Vec<u8> {
+    data.lines()
+        .flat_map(|line| {
+            line.split_once(':')
+                .map(|(_, hex)| hex)
+                .unwrap_or("")
+                .split_whitespace()
+                .filter(|word| word.len() == 4 && word.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                .flat_map(|word| {
+                    [
+                        u8::from_str_radix(&word[..2], 16),
+                        u8::from_str_radix(&word[2..], 16),
+                    ]
+                })
+                .flatten()
+        })
+        .collect()
+}
+
+fn extract_gpmf_gyro(bytes: &[u8], inherited_scale: f32, output: &mut Vec<[f32; 3]>) {
+    let mut offset = 0;
+    let mut scale = inherited_scale;
+    while offset + 8 <= bytes.len() {
+        let key = &bytes[offset..offset + 4];
+        let kind = bytes[offset + 4];
+        let size = bytes[offset + 5] as usize;
+        let count = u16::from_be_bytes([bytes[offset + 6], bytes[offset + 7]]) as usize;
+        let data_len = match size.checked_mul(count) {
+            Some(value) => value,
+            None => return,
+        };
+        let data_start = offset + 8;
+        let data_end = match data_start.checked_add(data_len) {
+            Some(value) if value <= bytes.len() => value,
+            _ => return,
+        };
+        let data = &bytes[data_start..data_end];
+        if key == b"SCAL" && data.len() >= 4 {
+            let raw = i32::from_be_bytes(data[..4].try_into().expect("four bytes"));
+            if raw != 0 {
+                scale = raw as f32;
+            }
+        } else if key == b"GYRO" && kind == b's' && size >= 6 {
+            for chunk in data.chunks_exact(size) {
+                output.push([
+                    i16::from_be_bytes([chunk[0], chunk[1]]) as f32 / scale,
+                    i16::from_be_bytes([chunk[2], chunk[3]]) as f32 / scale,
+                    i16::from_be_bytes([chunk[4], chunk[5]]) as f32 / scale,
+                ]);
+            }
+        } else if kind == 0 || key == b"DEVC" || key == b"STRM" {
+            extract_gpmf_gyro(data, scale, output);
+        }
+        offset = data_end + ((4 - data_len % 4) % 4);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +294,23 @@ mod tests {
     #[test]
     fn malformed_json_is_an_error() {
         assert!(parse_ffprobe_json("not json").is_err());
+    }
+
+    #[test]
+    fn parses_nested_gpmf_gyro_samples_from_ffprobe_packets() {
+        // DEVC -> SCAL (100) + GYRO (two signed-short XYZ samples).
+        let hex =
+            "4445 5643 0000 0020 5343 414c 6c04 0001 0000 0064 4759 524f 7306 0002 000a 0014 ffe2 001e ffd8 0028";
+        let json = format!(r#"{{"packets":[{{"data":"\n00000000: {hex}"}}]}}"#);
+        let trace = parse_gyro_packets_json(&json).unwrap();
+        assert_eq!(trace.samples.len(), 2);
+        assert_eq!(trace.samples[0], [0.1, 0.2, -0.3]);
+        assert_eq!(trace.samples[1], [0.3, -0.4, 0.4]);
+    }
+
+    #[test]
+    fn gyro_packets_without_gyro_data_are_ignored() {
+        assert!(parse_gyro_packets_json(r#"{"packets":[]}"#).is_none());
     }
 
     #[test]
