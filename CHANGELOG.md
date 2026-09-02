@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/mroxso/FPVEditor/compare/v0.10.0...v0.10.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* document macOS CLI release target ([#65](https://github.com/mroxso/FPVEditor/issues/65)) ([e05f418](https://github.com/mroxso/FPVEditor/commit/e05f418aaedf3df5c7b81b41c221f2e12c6cf250))
+
 ## [0.10.0](https://github.com/mroxso/FPVEditor/compare/v0.9.0...v0.10.0) (2026-09-02)
 
 
