@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum MediaError {
+    #[error("export was cancelled")]
+    Cancelled,
     #[error("failed to spawn `{binary}`: {source}")]
     Spawn {
         binary: String,

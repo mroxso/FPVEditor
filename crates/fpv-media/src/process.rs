@@ -3,8 +3,11 @@
 //! pure and unit-testable without actually running a process.
 
 use std::io::ErrorKind;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::error::{MediaError, MediaResult};
 use serde::Serialize;
@@ -159,6 +162,77 @@ pub fn run(binary: &str, args: &[String]) -> MediaResult<()> {
     let output = command_for(binary)
         .args(args)
         .output()
+        .map_err(|source| MediaError::Spawn {
+            binary: binary.to_string(),
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(MediaError::NonZeroExit {
+            binary: binary.to_string(),
+            status: output.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Run FFmpeg with its machine-readable progress stream enabled. `out_time_us`
+/// is reported in microseconds, which keeps the UI independent of locale and
+/// FFmpeg's human-readable stderr formatting.
+pub fn run_with_progress(
+    binary: &str,
+    args: &[String],
+    on_progress: impl FnMut(u64),
+) -> MediaResult<()> {
+    run_with_progress_and_cancel(binary, args, Arc::new(AtomicBool::new(false)), on_progress)
+}
+
+pub fn run_with_progress_and_cancel(
+    binary: &str,
+    args: &[String],
+    cancelled: Arc<AtomicBool>,
+    mut on_progress: impl FnMut(u64),
+) -> MediaResult<()> {
+    let mut command_args = args.to_vec();
+    let output = command_args
+        .pop()
+        .ok_or_else(|| MediaError::Parse("missing export output path".into()))?;
+    command_args.extend([
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        output,
+    ]);
+    let mut child = command_for(binary)
+        .args(&command_args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| MediaError::Spawn {
+            binary: binary.to_string(),
+            source,
+        })?;
+    if let Some(stdout) = child.stdout.take() {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if cancelled.load(Ordering::Relaxed) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(MediaError::Cancelled);
+            }
+            if let Some(value) = line.strip_prefix("out_time_us=") {
+                if let Ok(microseconds) = value.parse() {
+                    on_progress(microseconds);
+                }
+            }
+        }
+    }
+    if cancelled.load(Ordering::Relaxed) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(MediaError::Cancelled);
+    }
+    let output = child
+        .wait_with_output()
         .map_err(|source| MediaError::Spawn {
             binary: binary.to_string(),
             source,

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use fpv_ai::ProviderConfig;
 use fpv_app::{AppState, ExecuteOutcome, MediaDiagnostics, MediaImportOutcome, UpdateCheckResult};
 use fpv_core::{Command, Project};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 type AppResult<T> = Result<T, String>;
@@ -105,6 +105,42 @@ async fn render_preview(
 }
 
 #[tauri::command]
+async fn export_timeline(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: fpv_media::ExportSettings,
+) -> AppResult<()> {
+    let app_for_progress = app.clone();
+    app_error(
+        state
+            .export_timeline(settings, move |progress| {
+                let _ = app_for_progress.emit("export-progress", progress);
+            })
+            .await,
+    )?;
+    app.emit(
+        "export-progress",
+        fpv_app::ExportProgress {
+            rendered_seconds: 0.0,
+            total_seconds: 0.0,
+            percent: 100,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_export(state: State<'_, AppState>) {
+    state.cancel_export();
+}
+
+#[tauri::command]
+fn export_capabilities(state: State<'_, AppState>) -> AppResult<fpv_media::ExportCapabilities> {
+    app_error(state.export_capabilities())
+}
+
+#[tauri::command]
 async fn configure_ai(state: State<'_, AppState>, config: ProviderConfig) -> AppResult<()> {
     state.configure_ai(config).await;
     Ok(())
@@ -159,6 +195,9 @@ fn main() {
             media_diagnostics,
             import_media,
             render_preview,
+            export_timeline,
+            cancel_export,
+            export_capabilities,
             configure_ai,
             test_ai_connection,
             chat,
