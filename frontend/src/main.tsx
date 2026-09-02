@@ -1804,7 +1804,7 @@ function SettingsDialog({
                           <Badge variant="secondary">New</Badge>
                         </div>
                         {updateCheck.release_notes && (
-                          <p className="mt-2 line-clamp-4 whitespace-pre-line leading-5 text-muted-foreground">
+                          <p className="mt-2 line-clamp-4 break-words whitespace-pre-line leading-5 text-muted-foreground">
                             {updateCheck.release_notes}
                           </p>
                         )}
