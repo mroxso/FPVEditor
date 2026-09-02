@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use fpv_ai::{AiClient, ProviderConfig};
-use fpv_core::{Command, CommandBus, NewClip, Project, Timecode, TrackKind};
+use fpv_core::{Command, CommandBus, NewClip, Project, Timecode, TrackId, TrackKind};
 use serde::Serialize;
 use tokio::sync::{Mutex, Semaphore};
 
@@ -145,7 +145,11 @@ impl AppState {
     /// Import files or recursively scan folders for video sources. This only
     /// reads metadata through ffprobe; originals (including network shares)
     /// remain in place and project clips reference their source paths.
-    pub async fn import_media_paths(&self, paths: Vec<PathBuf>) -> Result<MediaImportOutcome> {
+    pub async fn import_media_paths(
+        &self,
+        paths: Vec<PathBuf>,
+        target_track_id: Option<TrackId>,
+    ) -> Result<MediaImportOutcome> {
         let candidates = collect_media_files(&paths)?;
         if candidates.is_empty() {
             anyhow::bail!("no supported video files were found")
@@ -188,20 +192,32 @@ impl AppState {
             anyhow::bail!("no readable video files could be imported ({detail})")
         }
 
-        let video_track = match bus
-            .project()
-            .tracks
-            .iter()
-            .find(|track| track.kind == TrackKind::Video)
-        {
-            Some(track) => track.id,
-            None => {
-                bus.execute(Command::AddTrack {
-                    kind: TrackKind::Video,
-                    name: "V1".into(),
-                })?;
-                bus.project().tracks.last().expect("new track exists").id
+        let video_track = match target_track_id {
+            Some(track_id) => {
+                let track = bus
+                    .project()
+                    .track(track_id)
+                    .ok_or_else(|| anyhow::anyhow!("target track {track_id} was not found"))?;
+                if track.kind != TrackKind::Video {
+                    anyhow::bail!("target track {track_id} is not a video track")
+                }
+                track.id
             }
+            None => match bus
+                .project()
+                .tracks
+                .iter()
+                .find(|track| track.kind == TrackKind::Video)
+            {
+                Some(track) => track.id,
+                None => {
+                    bus.execute(Command::AddTrack {
+                        kind: TrackKind::Video,
+                        name: "V1".into(),
+                    })?;
+                    bus.project().tracks.last().expect("new track exists").id
+                }
+            },
         };
 
         let mut imported_paths = Vec::new();
@@ -463,7 +479,7 @@ mod tests {
         assert!(generated.status.success());
 
         let outcome = AppState::default()
-            .import_media_paths(vec![source.clone()])
+            .import_media_paths(vec![source.clone()], None)
             .await
             .unwrap();
 
@@ -473,6 +489,53 @@ mod tests {
             outcome.project.clips.values().next().unwrap().source_path,
             source
         );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn media_import_keeps_each_clip_on_its_requested_video_track() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping: ffmpeg is not available on PATH");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("fpv-app-targeted-import-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source_v2 = root.join("v2-source.mp4");
+        let source_v3 = root.join("v3-source.mp4");
+        for source in [&source_v2, &source_v3] {
+            let generated = std::process::Command::new("ffmpeg")
+                .args([
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=size=160x120:rate=24:duration=1",
+                    "-pix_fmt",
+                    "yuv420p",
+                    source.to_str().unwrap(),
+                ])
+                .output()
+                .unwrap();
+            assert!(generated.status.success());
+        }
+
+        let state = AppState::default();
+        let v1 = state.execute_command(Command::AddTrack { kind: TrackKind::Video, name: "V1".into() }).await.unwrap().project.tracks[0].id;
+        let v2 = state.execute_command(Command::AddTrack { kind: TrackKind::Video, name: "V2".into() }).await.unwrap().project.tracks[1].id;
+        let v3 = state.execute_command(Command::AddTrack { kind: TrackKind::Video, name: "V3".into() }).await.unwrap().project.tracks[2].id;
+
+        let v2_import = state.import_media_paths(vec![source_v2], Some(v2)).await.unwrap();
+        let v2_clip = v2_import.project.tracks[1].clip_order[0];
+        let v3_import = state.import_media_paths(vec![source_v3], Some(v3)).await.unwrap();
+        let v3_clip = v3_import.project.tracks[2].clip_order[0];
+
+        assert_eq!(v3_import.project.track_of_clip(v2_clip), Some(v2));
+        assert_eq!(v3_import.project.track_of_clip(v3_clip), Some(v3));
+        assert!(v3_import.project.track(v1).unwrap().clip_order.is_empty());
         std::fs::remove_dir_all(root).ok();
     }
 

@@ -439,11 +439,11 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [removeSelected, splitSelected]);
-  const importPaths = useCallback(async (paths: string[]) => {
+  const importPaths = useCallback(async (paths: string[], targetTrackId?: string) => {
     if (paths.length === 0) return;
     try {
       setNotice(`Reading ${paths.length === 1 ? fileName(paths[0]) : `${paths.length} sources`}…`);
-      const outcome = await invoke<MediaImportOutcome>("import_media", { paths });
+      const outcome = await invoke<MediaImportOutcome>("import_media", { paths, targetTrackId });
       apply(outcome);
       const firstImported = Object.values(outcome.project.clips).find((clip) =>
         outcome.imported_paths.includes(clip.source_path),
@@ -474,11 +474,19 @@ function App() {
     try {
       void getCurrentWindow()
         .onDragDropEvent((event) => {
-          if (event.payload.type === "enter") setDragActive(true);
-          if (event.payload.type === "leave") setDragActive(false);
-          if (event.payload.type === "drop") {
+          const payload = event.payload;
+          if (payload.type === "enter") setDragActive(true);
+          if (payload.type === "leave") setDragActive(false);
+          if (payload.type === "drop") {
             setDragActive(false);
-            void importPaths(event.payload.paths);
+            void (async () => {
+              const logicalPosition = payload.position.toLogical(await getCurrentWindow().scaleFactor());
+              const targetTrackId = document
+                .elementFromPoint(logicalPosition.x, logicalPosition.y)
+                ?.closest<HTMLElement>("[data-track-id]")
+                ?.dataset.trackId;
+              await importPaths(payload.paths, targetTrackId);
+            })();
           }
         })
         .then((stop) => {
