@@ -69,6 +69,13 @@ pub struct MediaDiagnostics {
     pub ffprobe: fpv_media::ToolDiagnostic,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportProgress {
+    pub rendered_seconds: f64,
+    pub total_seconds: f64,
+    pub percent: u8,
+}
+
 impl AppState {
     pub fn new(project: Project) -> Self {
         Self {
@@ -273,12 +280,28 @@ impl AppState {
         fpv_media::export_clip(clip, settings).context("ffmpeg export failed")
     }
 
-    pub async fn export_timeline(&self, settings: fpv_media::ExportSettings) -> Result<()> {
+    pub async fn export_timeline(
+        &self,
+        settings: fpv_media::ExportSettings,
+        on_progress: impl Fn(ExportProgress) + Send + Sync + 'static,
+    ) -> Result<()> {
         let project = self.bus.lock().await.project().clone();
-        tokio::task::spawn_blocking(move || fpv_media::export_timeline(&project, &settings))
-            .await
-            .context("export renderer task stopped unexpectedly")?
-            .context("ffmpeg export failed")
+        let total_seconds = project.duration().seconds().max(0.01);
+        tokio::task::spawn_blocking(move || {
+            fpv_media::export_timeline_with_progress(&project, &settings, |microseconds| {
+                let rendered_seconds = microseconds as f64 / 1_000_000.0;
+                on_progress(ExportProgress {
+                    rendered_seconds: rendered_seconds.min(total_seconds),
+                    total_seconds,
+                    percent: ((rendered_seconds / total_seconds * 100.0)
+                        .clamp(0.0, 99.0)
+                        .round()) as u8,
+                });
+            })
+        })
+        .await
+        .context("export renderer task stopped unexpectedly")?
+        .context("ffmpeg export failed")
     }
 
     pub fn export_capabilities(&self) -> Result<fpv_media::ExportCapabilities> {

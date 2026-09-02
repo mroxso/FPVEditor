@@ -241,6 +241,14 @@ pub fn export_clip(clip: &Clip, settings: &ExportSettings) -> MediaResult<()> {
 /// Render all video clips into their timeline positions. Audio from timeline
 /// clips is delayed to the same position and mixed when sources provide it.
 pub fn export_timeline(project: &Project, settings: &ExportSettings) -> MediaResult<()> {
+    export_timeline_with_progress(project, settings, |_| {})
+}
+
+pub fn export_timeline_with_progress(
+    project: &Project,
+    settings: &ExportSettings,
+    on_progress: impl FnMut(u64),
+) -> MediaResult<()> {
     settings.validate()?;
     let clips: Vec<&Clip> = project
         .tracks
@@ -293,7 +301,21 @@ pub fn export_timeline(project: &Project, settings: &ExportSettings) -> MediaRes
         if let Some(lut) = &clip.lut_path {
             video_filters.push_str(&format!(",lut3d='{}'", lut.to_string_lossy()));
         }
-        video_filters.push_str(&format!("{video};{previous}{video}overlay=eof_action=pass:shortest=0:x=0:y=0:enable='between(t,{:.6},{:.6})'{output};", clip.position.seconds(), clip.position.seconds() + clip.source_duration().seconds()));
+        // Offset each source before overlaying it. The earlier implementation
+        // enabled the overlay at its timeline position but left its frames at
+        // time zero, so clips on later tracks had already reached EOF.
+        video_filters = format!(
+            "[{input}:v]setpts=PTS-STARTPTS+{:.6}/TB,scale={}:{}",
+            clip.position.seconds(),
+            settings.width,
+            settings.height
+        );
+        if let Some(lut) = &clip.lut_path {
+            video_filters.push_str(&format!(",lut3d='{}'", lut.to_string_lossy()));
+        }
+        video_filters.push_str(&format!(
+            "{video};{previous}{video}overlay=eof_action=pass:shortest=0:x=0:y=0{output};"
+        ));
         filter.push_str(&video_filters);
         previous = output;
         if crate::probe::probe(&clip.source_path)
@@ -339,7 +361,7 @@ pub fn export_timeline(project: &Project, settings: &ExportSettings) -> MediaRes
         args.extend(["-movflags".into(), "+faststart".into()]);
     }
     args.push(settings.output_path.to_string_lossy().into_owned());
-    process::run("ffmpeg", &args)
+    process::run_with_progress("ffmpeg", &args, on_progress)
 }
 
 /// Fast, resource-bounded rendition for the editor monitor.  Final exports
