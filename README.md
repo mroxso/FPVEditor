@@ -33,90 +33,111 @@ server, so every timeline change uses the same command bus with undo/redo suppor
 
 ## Getting started
 
-### Prerequisites
+### Install the CLI (recommended)
 
-- Rust stable (edition 2021)
-- Node.js and npm
-- `ffmpeg` and `ffprobe` on `PATH` for media operations and the full test suite
-- A usable `wgpu` adapter for GPU tests (Metal, Vulkan, or DX12)
+For most users, the standalone CLI is the easiest way to start. It does not
+require Git, Rust, or Cargo. The installer downloads the right binary for your
+computer, verifies its SHA-256 checksum, and installs the `fpv` command.
 
-On macOS, FFmpeg can be installed with:
-
-```sh
-brew install ffmpeg
-```
-
-### Run the desktop editor
-
-```sh
-git clone https://github.com/mroxso/FPVEditor.git
-cd FPVEditor
-cd frontend && npm install && cd ..
-cargo run -p fpv-app
-```
-
-The frontend development server is available separately at `http://127.0.0.1:1420`:
-
-```sh
-cd frontend
-npm run dev
-```
-
-### Install the CLI
-
-The standalone CLI does not require Git, Rust, or Cargo. It currently uses the
-system-installed `ffmpeg` and `ffprobe` for media probing and export.
-
-On macOS or Linux:
+On macOS or Linux, open a terminal and run:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mroxso/FPVEditor/main/scripts/install-fpv-cli.sh | bash
 ```
 
-On Windows, run this in PowerShell:
+On Windows, open PowerShell and run:
 
 ```powershell
 irm https://raw.githubusercontent.com/mroxso/FPVEditor/main/scripts/install-fpv-cli.ps1 | iex
 ```
 
-The installers select the correct release asset, verify its SHA-256 checksum,
-and install `fpv` into a user-local directory. The Windows installer adds that
-directory to the user `PATH`; on macOS and Linux, it prints the `PATH` command
-if one is needed. To install a specific release or use another target directory,
-set `FPV_VERSION` or `FPV_INSTALL_DIR` before running the macOS/Linux installer.
+The Windows installer adds `fpv` to your user `PATH`. On macOS and Linux, the
+installer prints a command to add its installation directory to `PATH` when
+needed; open a new terminal after doing so.
 
-To upgrade, run the installer again. To uninstall, remove the installed `fpv`
-binary (by default `~/.local/bin/fpv` on macOS/Linux or
-`%LOCALAPPDATA%\\FPVEditor\\bin\\fpv.exe` on Windows) and, if desired, remove that
-directory from your `PATH`.
+`fpv` uses the system-installed `ffmpeg` and `ffprobe` for media probing and
+export. Install FFmpeg before working with video files:
 
-For manual installation, download the matching `fpv-cli-*` archive and
-`fpv-cli-checksums.txt` from the [latest GitHub release](https://github.com/mroxso/FPVEditor/releases/latest), verify the archive checksum, extract it, and place the `fpv` executable on your `PATH`.
+```sh
+# macOS (Homebrew)
+brew install ffmpeg
 
-### Use the CLI
+# Ubuntu or Debian
+sudo apt-get install ffmpeg
+```
 
-After installing the standalone CLI:
+On Windows, run `winget install Gyan.FFmpeg` in PowerShell.
+
+### Create your first project
+
+Check that the CLI is available, then create an empty project:
 
 ```sh
 fpv --help
+fpv new project.fpv.json --name "My FPV Edit"
 ```
 
-For development from a source checkout:
+Add a video track and inspect the project file to find the generated track ID:
 
 ```sh
-cargo run -p fpv-cli -- new project.fpv.json --name "My Edit"
-cargo run -p fpv-cli -- add-track project.fpv.json --kind video --name V1
-cargo run -p fpv-cli -- add-clip project.fpv.json --track <track-id> \
+fpv add-track project.fpv.json --kind video --name V1
+fpv show project.fpv.json
+```
+
+### Other CLI installation options
+
+You can also [download a release archive](https://github.com/mroxso/FPVEditor/releases/latest)
+manually. Download the `fpv-cli-*` archive matching your system and
+`fpv-cli-checksums.txt`, verify the archive checksum, extract it, and place the
+`fpv` executable on your `PATH`.
+
+Run the installation script again to upgrade. To install a specific release or
+choose another installation directory on macOS/Linux, set `FPV_VERSION` or
+`FPV_INSTALL_DIR` before running it. To uninstall, remove `fpv` from
+`~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\\FPVEditor\\bin` on Windows.
+
+### Use the CLI
+
+```sh
+fpv add-clip project.fpv.json --track <track-id> \
   --source run.mp4 --in 0 --out 12
-cargo run -p fpv-cli -- stabilize project.fpv.json --clip <clip-id> \
+fpv stabilize project.fpv.json --clip <clip-id> \
   --smoothness 0.6 --strength 1.0 --horizon-lock --dynamic-fov 0.15
-cargo run -p fpv-cli -- export project.fpv.json --clip <clip-id> --output out.mp4
+fpv export project.fpv.json --clip <clip-id> --output out.mp4
 ```
 
 To expose a project to an external MCP-capable agent:
 
 ```sh
-cargo run -p fpv-cli -- mcp-serve project.fpv.json
+fpv mcp-serve project.fpv.json
+```
+
+### Install from source
+
+Install from source if you want to develop FPV Editor, run the desktop app, or
+make changes to the CLI. You need Rust stable (edition 2021), Node.js and npm,
+and `ffmpeg` and `ffprobe` on your `PATH`. GPU tests additionally require a
+usable `wgpu` adapter (Metal, Vulkan, or DX12).
+
+```sh
+git clone https://github.com/mroxso/FPVEditor.git
+cd FPVEditor
+cd frontend && npm ci && cd ..
+cargo run -p fpv-app
+```
+
+To run the CLI from the source checkout without installing it globally:
+
+```sh
+cargo run -p fpv-cli -- --help
+cargo run -p fpv-cli -- new project.fpv.json --name "My Edit"
+```
+
+The frontend development server is available at `http://127.0.0.1:1420`:
+
+```sh
+cd frontend
+npm run dev
 ```
 
 ## Development
