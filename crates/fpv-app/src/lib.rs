@@ -24,16 +24,38 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use fpv_ai::{AiClient, ProviderConfig};
 use fpv_core::{Command, CommandBus, NewClip, Project, Timecode, TrackId, TrackKind};
-use serde::Serialize;
+use keyring::Entry;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Semaphore};
 
 pub use updates::UpdateCheckResult;
 
 type PreviewCache = Arc<Mutex<HashMap<(Option<String>, i64), PathBuf>>>;
 
+const AI_SETTINGS_SERVICE: &str = "com.mroxso.fpveditor";
+const AI_SETTINGS_ACCOUNT: &str = "ai-provider-settings";
+
+/// The non-secret portion of the AI settings. This is deliberately kept
+/// separate from credentials so the app config file never contains secrets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SavedAiSettings {
+    base_url: String,
+    model: String,
+}
+
+/// Values stored together in the operating system credential store. Headers
+/// often carry bearer tokens too, so they are treated as secrets alongside the
+/// API key.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SavedAiSecrets {
+    api_key: Option<String>,
+    extra_headers: HashMap<String, String>,
+}
+
 pub struct AppState {
     bus: Arc<Mutex<CommandBus>>,
     ai_config: Arc<Mutex<Option<ProviderConfig>>>,
+    ai_settings_path: Arc<Mutex<Option<PathBuf>>>,
     project_path: Arc<Mutex<Option<PathBuf>>>,
     preview_render_limit: Arc<Semaphore>,
     preview_cache: PreviewCache,
@@ -78,11 +100,93 @@ pub struct ExportProgress {
     pub percent: u8,
 }
 
+fn credential_entry() -> Result<Entry> {
+    Entry::new(AI_SETTINGS_SERVICE, AI_SETTINGS_ACCOUNT)
+        .context("could not access the operating system credential store")
+}
+
+fn load_ai_settings(path: &Path) -> Result<Option<ProviderConfig>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let saved: SavedAiSettings = serde_json::from_slice(
+        &fs::read(path)
+            .with_context(|| format!("could not read AI settings at {}", path.display()))?,
+    )
+    .with_context(|| format!("could not parse AI settings at {}", path.display()))?;
+
+    let secrets = match credential_entry()?.get_password() {
+        Ok(value) => {
+            serde_json::from_str(&value).context("could not parse AI provider credentials")?
+        }
+        // A missing keychain item is valid, for example when settings were
+        // copied from another machine or the user cleared their keychain.
+        Err(keyring::Error::NoEntry) => SavedAiSecrets::default(),
+        Err(error) => return Err(error).context("could not read AI provider credentials"),
+    };
+
+    Ok(Some(ProviderConfig {
+        base_url: saved.base_url,
+        api_key: secrets.api_key,
+        model: saved.model,
+        extra_headers: secrets.extra_headers,
+    }))
+}
+
+fn save_ai_settings(path: &Path, config: &ProviderConfig) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("AI settings path must have a parent directory")?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "could not create AI settings directory at {}",
+            parent.display()
+        )
+    })?;
+
+    let public_settings = SavedAiSettings {
+        base_url: config.base_url.clone(),
+        model: config.model.clone(),
+    };
+    let encoded =
+        serde_json::to_vec_pretty(&public_settings).context("could not serialize AI settings")?;
+    let temporary_path = path.with_extension("json.tmp");
+    fs::write(&temporary_path, encoded).with_context(|| {
+        format!(
+            "could not write AI settings at {}",
+            temporary_path.display()
+        )
+    })?;
+    fs::rename(&temporary_path, path)
+        .with_context(|| format!("could not save AI settings at {}", path.display()))?;
+
+    let secrets = SavedAiSecrets {
+        api_key: config.api_key.clone(),
+        extra_headers: config.extra_headers.clone(),
+    };
+    let entry = credential_entry()?;
+    if secrets.api_key.is_none() && secrets.extra_headers.is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error).context("could not clear AI provider credentials"),
+        }
+    } else {
+        entry
+            .set_password(
+                &serde_json::to_string(&secrets)
+                    .context("could not serialize AI provider credentials")?,
+            )
+            .context("could not save AI provider credentials")
+    }
+}
+
 impl AppState {
     pub fn new(project: Project) -> Self {
         Self {
             bus: Arc::new(Mutex::new(CommandBus::new(project))),
             ai_config: Arc::new(Mutex::new(None)),
+            ai_settings_path: Arc::new(Mutex::new(None)),
             project_path: Arc::new(Mutex::new(None)),
             preview_render_limit: Arc::new(Semaphore::new(1)),
             preview_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -415,8 +519,27 @@ impl AppState {
     }
 
     /// PLAN.md section 4.1: configure the AI provider (base URL/key/model).
-    pub async fn configure_ai(&self, config: ProviderConfig) {
+    /// Load AI settings after Tauri has resolved its platform-specific app
+    /// config directory. Missing settings are normal on first launch.
+    pub async fn initialize_ai_settings(&self, path: PathBuf) -> Result<()> {
+        let config = load_ai_settings(&path)?;
+        *self.ai_settings_path.lock().await = Some(path);
+        *self.ai_config.lock().await = config;
+        Ok(())
+    }
+
+    pub async fn configure_ai(&self, config: ProviderConfig) -> Result<()> {
+        if let Some(path) = self.ai_settings_path.lock().await.clone() {
+            save_ai_settings(&path, &config)?;
+        }
         *self.ai_config.lock().await = Some(config);
+        Ok(())
+    }
+
+    /// Return the restored configuration so the Settings form reflects the
+    /// provider that is already active in this session.
+    pub async fn ai_config(&self) -> Option<ProviderConfig> {
+        self.ai_config.lock().await.clone()
     }
 
     pub async fn test_ai_connection(&self) -> Result<()> {
@@ -505,6 +628,18 @@ mod tests {
     use fpv_core::TrackKind;
     use wiremock::matchers::{method, path as wpath};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn public_ai_settings_never_include_credentials() {
+        let settings = SavedAiSettings {
+            base_url: "https://provider.example/v1".into(),
+            model: "model-a".into(),
+        };
+        let encoded = serde_json::to_string(&settings).unwrap();
+
+        assert!(!encoded.contains("api_key"));
+        assert!(!encoded.contains("extra_headers"));
+    }
 
     #[test]
     fn media_collection_recurses_and_keeps_only_supported_video_paths() {
@@ -730,7 +865,8 @@ mod tests {
         let state = AppState::default();
         state
             .configure_ai(ProviderConfig::new(server.uri(), "test-model"))
-            .await;
+            .await
+            .unwrap();
 
         let reply = state.chat("hello").await.unwrap();
         assert_eq!(reply, "done");
@@ -791,7 +927,8 @@ mod tests {
 
         state
             .configure_ai(ProviderConfig::new(server.uri(), "test-model"))
-            .await;
+            .await
+            .unwrap();
         let reply = state.chat("add my run.mp4 clip").await.unwrap();
         assert_eq!(reply, "added it");
 
