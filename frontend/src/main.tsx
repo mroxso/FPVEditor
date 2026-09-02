@@ -726,6 +726,7 @@ function App() {
           setOpen={setSettingsOpen}
           provider={provider}
           project={project}
+          notice={notice}
           setProvider={setProvider}
           saveProvider={saveProvider}
           appVersion={appVersion}
@@ -1592,6 +1593,7 @@ function SettingsDialog({
   setOpen,
   provider,
   project,
+  notice,
   setProvider,
   saveProvider,
   appVersion,
@@ -1609,6 +1611,7 @@ function SettingsDialog({
   setOpen: (value: boolean) => void;
   provider: Provider;
   project: Project;
+  notice: string;
   setProvider: (value: Provider) => void;
   saveProvider: (test?: boolean) => Promise<void>;
   appVersion: string;
@@ -1624,6 +1627,12 @@ function SettingsDialog({
 }) {
   const set = (key: keyof Provider, value: string | null) =>
     setProvider({ ...provider, [key]: value });
+  const connectionNotice =
+    notice === "Testing AI connection…" ||
+    notice === "AI provider connected" ||
+    notice.startsWith("AI connection failed:")
+      ? notice
+      : undefined;
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
@@ -1692,6 +1701,17 @@ function SettingsDialog({
               <Label htmlFor="provider-api-key">API key <span className="font-normal text-muted-foreground">(optional)</span></Label>
               <Input id="provider-api-key" type="password" value={provider.api_key ?? ""} onChange={(event) => set("api_key", event.target.value || null)} placeholder="sk-…" />
             </div>
+            <Button variant="outline" className="w-full" onClick={() => void saveProvider(true)}>
+              Test connection
+            </Button>
+            {connectionNotice && (
+              <p
+                role="status"
+                className={`text-xs ${connectionNotice.startsWith("AI connection failed:") ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                {connectionNotice}
+              </p>
+            )}
           </TabsContent>
           <TabsContent value="updates" className="mt-4 space-y-3">
             <Card size="sm" className="shadow-none">
@@ -1768,9 +1788,6 @@ function SettingsDialog({
           </TabsContent>
         </Tabs>
         <DialogFooter>
-          <Button variant="outline" onClick={() => void saveProvider(true)}>
-            Test connection
-          </Button>
           <Button
             onClick={() => {
               void saveProvider();
