@@ -142,8 +142,12 @@ fn export_capabilities(state: State<'_, AppState>) -> AppResult<fpv_media::Expor
 
 #[tauri::command]
 async fn configure_ai(state: State<'_, AppState>, config: ProviderConfig) -> AppResult<()> {
-    state.configure_ai(config).await;
-    Ok(())
+    app_error(state.configure_ai(config).await)
+}
+
+#[tauri::command]
+async fn ai_config(state: State<'_, AppState>) -> AppResult<Option<ProviderConfig>> {
+    Ok(state.ai_config().await)
 }
 
 #[tauri::command]
@@ -183,6 +187,19 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
+        .setup(|app| {
+            let settings_path = app
+                .path()
+                .app_config_dir()
+                .map_err(|error| error.to_string())?
+                .join("ai-provider.json");
+            tauri::async_runtime::block_on(
+                app.state::<AppState>()
+                    .initialize_ai_settings(settings_path),
+            )
+            .map_err(|error| error.to_string())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             timeline,
             execute,
@@ -199,6 +216,7 @@ fn main() {
             cancel_export,
             export_capabilities,
             configure_ai,
+            ai_config,
             test_ai_connection,
             chat,
             check_for_updates,

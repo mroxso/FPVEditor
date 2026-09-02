@@ -406,6 +406,9 @@ function App() {
   };
   useEffect(() => {
     void refresh();
+    void invoke<Provider | null>("ai_config")
+      .then((config) => { if (config) setProvider(config); })
+      .catch(() => undefined);
     void getVersion().then(setAppVersion).catch(() => undefined);
   }, []);
   useEffect(() => {
@@ -655,7 +658,7 @@ function App() {
         await invoke("test_ai_connection");
         setNotice("AI provider connected");
       } else {
-        setNotice("AI settings saved for this session");
+        setNotice("AI settings saved securely");
       }
     } catch (error) {
       setNotice(`AI connection failed: ${String(error)}`);
