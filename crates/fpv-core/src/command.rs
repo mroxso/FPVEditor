@@ -135,10 +135,11 @@ impl Command {
                 let track = project
                     .track(*track_id)
                     .ok_or(CoreError::TrackNotFound(*track_id))?;
-                if !track.clip_order.is_empty() {
-                    return Err(CoreError::TrackNotEmpty(*track_id));
-                }
+                let clip_ids = track.clip_order.clone();
                 project.tracks.retain(|t| t.id != *track_id);
+                for clip_id in clip_ids {
+                    project.clips.remove(&clip_id);
+                }
                 Ok(())
             }
             Command::AddClip { track_id, clip } => {
@@ -401,6 +402,19 @@ mod tests {
         let first = add_clip_at(&mut project, track_id, 10.0);
         let second = add_clip_at(&mut project, track_id, 0.0);
         assert_eq!(project.tracks[0].clip_order, vec![second, first]);
+    }
+
+    #[test]
+    fn remove_track_removes_its_clips() {
+        let (mut project, track_id) = project_with_track();
+        let clip_id = add_clip_at(&mut project, track_id, 0.0);
+
+        Command::RemoveTrack { track_id }
+            .apply(&mut project)
+            .unwrap();
+
+        assert!(project.tracks.is_empty());
+        assert!(!project.clips.contains_key(&clip_id));
     }
 
     #[test]

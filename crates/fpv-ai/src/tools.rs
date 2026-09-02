@@ -61,7 +61,7 @@ pub fn catalog() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "remove_track",
-            description: "Remove an empty track from the project.",
+            description: "Remove a track and all of its clips from the project.",
             parameters: json!({
                 "type": "object",
                 "properties": {
