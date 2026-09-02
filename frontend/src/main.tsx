@@ -277,7 +277,9 @@ function App() {
   const activePhaseIndex = workflowPhases.findIndex((phase) => phase.id === activePhase);
   const activeWorkflowPhase = workflowPhases[activePhaseIndex];
   const showTimeline = activePhase === "cut";
-  const showMedia = activePhase !== "export";
+  // The import phase is a dedicated media browser. Keeping the library out of
+  // the narrow side rail gives source previews enough room to be useful.
+  const showMedia = activePhase !== "export" && activePhase !== "import";
   const showInspector = activePhase === "stabilize" || activePhase === "cut" || activePhase === "grade";
   const showCopilot = activePhase === "cut" && copilotOpen;
   const hasUnsavedChanges = JSON.stringify(project) !== savedProject;
@@ -681,7 +683,7 @@ function App() {
           className="grid min-h-0"
           style={{
             gridTemplateColumns: [
-              showMedia ? (mediaOpen ? "230px" : "42px") : "0px",
+              ...(showMedia ? [mediaOpen ? "230px" : "42px"] : []),
               "minmax(420px,1fr)",
               ...(showInspector ? [inspectorOpen ? "270px" : "42px"] : []),
               ...(showCopilot ? ["310px"] : []),
@@ -719,7 +721,13 @@ function App() {
             </div>}
           </aside>}
           <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px] bg-muted/30">
-            {activePhase === "export" ? <ExportWorkspace project={project} selectedClip={selectedClip} saveProject={saveProject} /> : <Preview
+            {activePhase === "import" ? <ImportWorkspace
+              clips={Object.values(project.clips)}
+              selected={selected}
+              selectClip={setSelected}
+              importMedia={importMedia}
+              importFolder={importFolder}
+            /> : activePhase === "export" ? <ExportWorkspace project={project} selectedClip={selectedClip} saveProject={saveProject} /> : <Preview
               project={project}
               selectedClip={selectedClip}
               phase={activePhase}
@@ -881,6 +889,76 @@ function EmptyMedia({
         </Button>
       </CardContent>
     </Card>
+  );
+}
+function ImportWorkspace({
+  clips,
+  selected,
+  selectClip,
+  importMedia,
+  importFolder,
+}: {
+  clips: Clip[];
+  selected?: string;
+  selectClip: (id: string) => void;
+  importMedia: () => Promise<void>;
+  importFolder: () => Promise<void>;
+}) {
+  return (
+    <section className="import-workspace overflow-y-auto">
+      <div className="import-workspace-heading">
+        <div>
+          <p className="import-kicker">Source library</p>
+          <h1>Build your flight bin.</h1>
+          <p className="import-subtitle">Link original footage without moving it. Every source remains exactly where you shot it.</p>
+        </div>
+        <div className="import-count" aria-label={`${clips.length} imported clips`}><span>{String(clips.length).padStart(2, "0")}</span> clips linked</div>
+      </div>
+      {clips.length === 0 ? (
+        <div className="import-empty">
+          <div className="import-empty-icon"><Video /></div>
+          <p className="import-kicker">Nothing in the bin</p>
+          <h2>Bring in the footage.</h2>
+          <p>Choose individual video files, an entire card dump, or drag sources into this window.</p>
+          <div className="import-empty-actions">
+            <Button onClick={() => void importMedia()}><Plus data-icon="inline-start" />Choose media</Button>
+            <Button variant="outline" onClick={() => void importFolder()}><FolderInput data-icon="inline-start" />Choose folder</Button>
+          </div>
+          <span className="import-empty-note">MP4 · MOV · MKV · M4V · AVI · WebM · MTS</span>
+        </div>
+      ) : (
+        <div className="import-gallery" aria-label="Imported media">
+          {clips.map((clip, index) => <ImportMediaCard key={clip.id} clip={clip} index={index} selected={selected === clip.id} selectClip={selectClip} />)}
+          <button type="button" className="import-add-card" onClick={() => void importMedia()}>
+            <Plus />
+            <span>Add more media</span>
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+function ImportMediaCard({ clip, index, selected, selectClip }: { clip: Clip; index: number; selected: boolean; selectClip: (id: string) => void }) {
+  const [unavailable, setUnavailable] = useState(false);
+  const source = useMemo(() => mediaSource(clip.source_path), [clip.source_path]);
+  const duration = timecode(clip.out_point - clip.in_point);
+  return (
+    <button type="button" className={`import-media-card ${selected ? "is-selected" : ""}`} onClick={() => selectClip(clip.id)} aria-pressed={selected}>
+      <div className="import-thumbnail">
+        {source && !unavailable ? (
+          <video src={source} muted playsInline preload="metadata" onError={() => setUnavailable(true)} onLoadedMetadata={(event) => { event.currentTarget.currentTime = 0.04; }} />
+        ) : (
+          <div className="import-thumbnail-fallback"><Clapperboard /><span>Preview unavailable</span></div>
+        )}
+        <span className="import-thumbnail-index">{String(index + 1).padStart(2, "0")}</span>
+        <span className="import-thumbnail-duration">{duration}</span>
+        {selected && <span className="import-selected-mark">Selected</span>}
+      </div>
+      <span className="import-card-copy">
+        <span className="import-card-name">{fileName(clip.source_path)}</span>
+        <span className="import-card-source">Linked original · {duration}</span>
+      </span>
+    </button>
   );
 }
 function EmptyInspector() {
