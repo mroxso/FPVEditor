@@ -1295,6 +1295,20 @@ function Timeline({
   setHeight: (height: number) => void;
 }) {
   const [draggingClip, setDraggingClip] = useState<{ id: string; position: number; trackId: string }>();
+  const rulerTicks = useMemo(() => {
+    const totalSeconds = Math.max(0.001, duration / 1_000_000);
+    const targetStep = totalSeconds / 6;
+    const step = [0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
+      .find((candidate) => candidate >= targetStep) ?? 7200;
+    const ticks = Array.from(
+      { length: Math.floor(totalSeconds / step) + 1 },
+      (_, index) => Math.round(index * step * 1_000_000),
+    );
+    // Always label the actual timeline end, even when it is not on a neat
+    // interval. This keeps the ruler, playhead, and rendered duration honest.
+    if (ticks[ticks.length - 1] !== duration) ticks.push(duration);
+    return ticks;
+  }, [duration]);
   const toTimecode = (value: number) => Math.round(Math.max(0, value));
   const timeAtPointer = (event: { clientX: number }, lane: HTMLElement) =>
     toTimecode(Math.min(duration, ((event.clientX - lane.getBoundingClientRect().left) / lane.getBoundingClientRect().width) * duration));
@@ -1453,12 +1467,12 @@ function Timeline({
       <div className="grid h-10 grid-cols-[148px_minmax(0,1fr)] border-b">
         <div className="border-r" />
         <div className="timeline-ruler relative" onPointerDown={(event) => setPlayhead(timeAtPointer(event, event.currentTarget))}>
-          {[0, 5, 10, 15, 20, 25, 30].map((second) => (
+          {rulerTicks.map((tick) => (
             <span
-              key={second}
+              key={tick}
               className="absolute top-3 font-mono text-[10px] text-muted-foreground"
-              style={{ left: `${(second / 30) * 100}%` }}
-            >{`00:${String(second).padStart(2, "0")}`}</span>
+              style={{ left: `${(tick / duration) * 100}%` }}
+            >{timecode(tick)}</span>
           ))}
         </div>
       </div>
