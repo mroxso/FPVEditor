@@ -710,7 +710,6 @@ function App() {
               })}
             </div>
           </nav>
-          {exporting && <Button variant="destructive" size="sm" onClick={() => void invoke("cancel_export")}>Cancel render</Button>}
           <div className="header-project">
             <Circle className="size-2 fill-foreground" />
             <span className="font-mono text-xs">{project.name}</span>
@@ -749,6 +748,7 @@ function App() {
             </IconButton>
           </div>
         </header>
+        {exporting && <Button className="fixed right-5 top-[72px] z-50" variant="destructive" size="sm" onClick={() => void invoke("cancel_export")}>Cancel render</Button>}
         <div className="phase-toolbar border-b">
           <div><span className="font-mono text-[10px] uppercase tracking-[.14em] text-muted-foreground">{activeWorkflowPhase.eyebrow}</span><span className="phase-description">{activeWorkflowPhase.description}</span></div>
           <div className="workflow-actions">
