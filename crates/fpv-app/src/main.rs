@@ -135,6 +135,11 @@ async fn download_update(
 
 fn main() {
     tauri::Builder::default()
+        .setup(|app| {
+            let binary_dir = app.path().resource_dir()?.join("binaries");
+            fpv_media::set_bundled_binary_dir(binary_dir);
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())

@@ -38,6 +38,10 @@ jobs:
             os: macos-14
             target: aarch64-apple-darwin
             bundle: dmg
+          - name: macOS x64
+            os: macos-13
+            target: x86_64-apple-darwin
+            bundle: dmg
           - name: Windows x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -59,6 +63,28 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Install FFmpeg build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential nasm
+      - name: Install FFmpeg build dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            base-devel
+            mingw-w64-ucrt-x86_64-gcc
+            make
+            nasm
+            curl
+            tar
+      - name: Build bundled FFmpeg tools (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: ./scripts/build-ffmpeg.sh
+      - name: Build bundled FFmpeg tools
+        if: runner.os != 'Windows'
+        run: ./scripts/build-ffmpeg.sh
       - name: Install Linux Tauri dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
@@ -89,8 +115,27 @@ jobs:
             crates/fpv-app/target/**/bundle/*/*.msi
           if-no-files-found: error
 
+  ffmpeg-source:
+    name: Publish FFmpeg corresponding source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || inputs.tag }}
+      - name: Download pinned FFmpeg source
+        run: |
+          mkdir -p release-assets
+          curl --fail --location --retry 3 --output release-assets/ffmpeg-7.1.1.tar.xz https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz
+          echo "733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1  release-assets/ffmpeg-7.1.1.tar.xz" | sha256sum --check
+          cp docs/legal/ffmpeg.md release-assets/FFMPEG-NOTICE.md
+          cp scripts/build-ffmpeg.sh release-assets/build-ffmpeg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-source
+          path: release-assets/
+
   release:
-    needs: build
+    needs: [build, ffmpeg-source]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

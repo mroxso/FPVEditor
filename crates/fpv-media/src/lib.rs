@@ -12,3 +12,4 @@ pub use export::{
     export_timeline_preview_range, generate_proxy, preview_dimensions, ExportSettings,
 };
 pub use probe::{probe, MediaInfo};
+pub use process::set_bundled_binary_dir;
