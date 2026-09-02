@@ -314,6 +314,7 @@ function App() {
   const [previewRequestId, setPreviewRequestId] = useState(0);
   const [editTool, setEditTool] = useState<EditTool>("select");
   const [activePhase, setActivePhase] = useState<WorkflowPhase>("import");
+  const [exporting, setExporting] = useState(false);
   const [undoable, setUndoable] = useState(false);
   const [redoable, setRedoable] = useState(false);
   const [notice, setNotice] = useState("Ready to edit");
@@ -704,10 +705,12 @@ function App() {
               {workflowPhases.map((phase, index) => {
                 const Icon = phase.icon;
                 const isActive = phase.id === activePhase;
-                return <button key={phase.id} type="button" role="tab" aria-selected={isActive} title={phase.description} className={`workflow-phase ${isActive ? "is-active" : ""} ${index < activePhaseIndex ? "is-complete" : ""}`} onClick={() => setActivePhase(phase.id)}><span className="workflow-phase-number">{String(index + 1).padStart(2, "0")}</span><Icon /><span>{phase.label}</span></button>;
+                const locked = exporting && !isActive;
+                return <button key={phase.id} type="button" role="tab" aria-selected={isActive} aria-disabled={locked} disabled={locked} title={locked ? "Export läuft — bitte erst abschließen oder abbrechen" : phase.description} className={`workflow-phase ${isActive ? "is-active" : ""} ${index < activePhaseIndex ? "is-complete" : ""}`} onClick={() => setActivePhase(phase.id)}><span className="workflow-phase-number">{String(index + 1).padStart(2, "0")}</span><Icon /><span>{phase.label}</span></button>;
               })}
             </div>
           </nav>
+          {exporting && <Button variant="destructive" size="sm" onClick={() => void invoke("cancel_export")}>Cancel render</Button>}
           <div className="header-project">
             <Circle className="size-2 fill-foreground" />
             <span className="font-mono text-xs">{project.name}</span>
@@ -802,7 +805,7 @@ function App() {
               selectClip={setSelected}
               importMedia={importMedia}
               importFolder={importFolder}
-            /> : activePhase === "export" ? <ExportWorkspace project={project} selectedClip={selectedClip} saveProject={saveProject} /> : <Preview
+            /> : activePhase === "export" ? <ExportWorkspace project={project} selectedClip={selectedClip} saveProject={saveProject} onExportingChange={setExporting} /> : <Preview
               project={project}
               selectedClip={selectedClip}
               phase={activePhase}
@@ -1049,7 +1052,7 @@ function EmptyInspector() {
     </div>
   );
 }
-function ExportWorkspace({ project, selectedClip, saveProject }: { project: Project; selectedClip?: Clip; saveProject: () => Promise<boolean> }) {
+function ExportWorkspace({ project, selectedClip, saveProject, onExportingChange }: { project: Project; selectedClip?: Clip; saveProject: () => Promise<boolean>; onExportingChange: (exporting: boolean) => void }) {
   const [container, setContainer] = useState<ExportContainer>("mp4");
   const [videoCodec, setVideoCodec] = useState<VideoCodec>("h264");
   const [audioCodec, setAudioCodec] = useState<AudioCodec>("aac");
@@ -1069,7 +1072,7 @@ function ExportWorkspace({ project, selectedClip, saveProject }: { project: Proj
   const runExport = async () => {
     const outputPath = await save({ defaultPath: `${project.name || "flight"}.${container}`, filters: [{ name: container.toUpperCase(), extensions: [container] }] });
     if (!outputPath) return;
-    setExporting(true); setProgress({ rendered_seconds: 0, total_seconds: 0, percent: 0 }); setResult(undefined);
+    setExporting(true); onExportingChange(true); setProgress({ rendered_seconds: 0, total_seconds: 0, percent: 0 }); setResult(undefined);
     const unlisten = await listen<ExportProgress>("export-progress", (event) => setProgress(event.payload));
     try {
       const settings: ExportSettings = { output_path: outputPath, width, height, fps, crf, container, video_codec: videoCodec, audio_codec: audioCodec };
@@ -1077,7 +1080,7 @@ function ExportWorkspace({ project, selectedClip, saveProject }: { project: Proj
       setProgress((current) => current ? { ...current, percent: 100 } : current);
       setResult(`Export complete: ${fileName(outputPath)}`);
     } catch (error) { setResult(`Export failed: ${String(error)}`); }
-    finally { unlisten(); setExporting(false); }
+    finally { unlisten(); setExporting(false); onExportingChange(false); }
   };
   const selectClass = "h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs";
   const supportedContainers = capabilities?.containers ?? ["mp4", "mov", "webm"];

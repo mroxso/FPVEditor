@@ -4,6 +4,8 @@
 //! actually runs it.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use fpv_core::{Clip, Project, Timecode, TrackKind};
 use serde::{Deserialize, Serialize};
@@ -249,6 +251,20 @@ pub fn export_timeline_with_progress(
     settings: &ExportSettings,
     on_progress: impl FnMut(u64),
 ) -> MediaResult<()> {
+    export_timeline_with_progress_and_cancel(
+        project,
+        settings,
+        Arc::new(AtomicBool::new(false)),
+        on_progress,
+    )
+}
+
+pub fn export_timeline_with_progress_and_cancel(
+    project: &Project,
+    settings: &ExportSettings,
+    cancelled: Arc<AtomicBool>,
+    on_progress: impl FnMut(u64),
+) -> MediaResult<()> {
     settings.validate()?;
     let clips: Vec<&Clip> = project
         .tracks
@@ -361,7 +377,7 @@ pub fn export_timeline_with_progress(
         args.extend(["-movflags".into(), "+faststart".into()]);
     }
     args.push(settings.output_path.to_string_lossy().into_owned());
-    process::run_with_progress("ffmpeg", &args, on_progress)
+    process::run_with_progress_and_cancel("ffmpeg", &args, cancelled, on_progress)
 }
 
 /// Fast, resource-bounded rendition for the editor monitor.  Final exports

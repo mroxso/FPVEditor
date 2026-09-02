@@ -131,6 +131,11 @@ async fn export_timeline(
 }
 
 #[tauri::command]
+fn cancel_export(state: State<'_, AppState>) {
+    state.cancel_export();
+}
+
+#[tauri::command]
 fn export_capabilities(state: State<'_, AppState>) -> AppResult<fpv_media::ExportCapabilities> {
     app_error(state.export_capabilities())
 }
@@ -191,6 +196,7 @@ fn main() {
             import_media,
             render_preview,
             export_timeline,
+            cancel_export,
             export_capabilities,
             configure_ai,
             test_ai_connection,

@@ -18,6 +18,7 @@ mod updates;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -36,6 +37,7 @@ pub struct AppState {
     project_path: Arc<Mutex<Option<PathBuf>>>,
     preview_render_limit: Arc<Semaphore>,
     preview_cache: PreviewCache,
+    export_cancelled: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -84,6 +86,7 @@ impl AppState {
             project_path: Arc::new(Mutex::new(None)),
             preview_render_limit: Arc::new(Semaphore::new(1)),
             preview_cache: Arc::new(Mutex::new(HashMap::new())),
+            export_cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -286,22 +289,35 @@ impl AppState {
         on_progress: impl Fn(ExportProgress) + Send + Sync + 'static,
     ) -> Result<()> {
         let project = self.bus.lock().await.project().clone();
+        self.export_cancelled.store(false, Ordering::Relaxed);
+        let cancelled = self.export_cancelled.clone();
         let total_seconds = project.duration().seconds().max(0.01);
-        tokio::task::spawn_blocking(move || {
-            fpv_media::export_timeline_with_progress(&project, &settings, |microseconds| {
-                let rendered_seconds = microseconds as f64 / 1_000_000.0;
-                on_progress(ExportProgress {
-                    rendered_seconds: rendered_seconds.min(total_seconds),
-                    total_seconds,
-                    percent: ((rendered_seconds / total_seconds * 100.0)
-                        .clamp(0.0, 99.0)
-                        .round()) as u8,
-                });
-            })
+        let result = tokio::task::spawn_blocking(move || {
+            fpv_media::export_timeline_with_progress_and_cancel(
+                &project,
+                &settings,
+                cancelled,
+                |microseconds| {
+                    let rendered_seconds = microseconds as f64 / 1_000_000.0;
+                    on_progress(ExportProgress {
+                        rendered_seconds: rendered_seconds.min(total_seconds),
+                        total_seconds,
+                        percent: ((rendered_seconds / total_seconds * 100.0)
+                            .clamp(0.0, 99.0)
+                            .round()) as u8,
+                    });
+                },
+            )
         })
         .await
         .context("export renderer task stopped unexpectedly")?
-        .context("ffmpeg export failed")
+        .context("ffmpeg export failed");
+        self.export_cancelled.store(false, Ordering::Relaxed);
+        result
+    }
+
+    pub fn cancel_export(&self) {
+        self.export_cancelled.store(true, Ordering::Relaxed);
     }
 
     pub fn export_capabilities(&self) -> Result<fpv_media::ExportCapabilities> {
