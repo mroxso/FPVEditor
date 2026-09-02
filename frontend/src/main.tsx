@@ -204,12 +204,14 @@ function ProjectLauncher({
   removeRecent,
   openProject,
   createProject,
+  appVersion,
 }: {
   recentProjects: RecentProject[];
   openRecent: (project: RecentProject) => Promise<void>;
   removeRecent: (path: string) => void;
   openProject: () => Promise<void>;
   createProject: (name: string) => Promise<void>;
+  appVersion: string;
 }) {
   const [name, setName] = useState("Untitled");
   return (
@@ -217,7 +219,7 @@ function ProjectLauncher({
       <section className="grid w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-2xl md:grid-cols-[1fr_1.25fr]">
         <div className="flex min-h-[440px] flex-col justify-between border-b bg-muted/30 p-8 md:border-b-0 md:border-r">
           <div><img className="mb-5 size-10" src={fpvEditorLogo} alt="FPV Editor" /><p className="font-heading text-xl font-semibold">FPV Editor</p><p className="mt-2 max-w-xs text-sm leading-6 text-muted-foreground">Start a new cut or pick up where your last flight left off.</p></div>
-          <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">Desktop cut suite · v0.1.0</p>
+          <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">Desktop cut suite · {appVersion ? `v${appVersion}` : "…"}</p>
         </div>
         <div className="p-8">
           <p className="mb-3 text-xs font-medium uppercase tracking-[.14em] text-muted-foreground">New project</p>
@@ -587,7 +589,7 @@ function App() {
     setWorkspaceOpen(false);
     setReturnToOverviewOpen(false);
   };
-  if (!workspaceOpen) return <ProjectLauncher recentProjects={recentProjects} openRecent={openRecent} removeRecent={removeRecent} openProject={loadProject} createProject={createProject} />;
+  if (!workspaceOpen) return <ProjectLauncher recentProjects={recentProjects} openRecent={openRecent} removeRecent={removeRecent} openProject={loadProject} createProject={createProject} appVersion={appVersion} />;
   const chat = async () => {
     if (!prompt.trim()) return;
     const text = prompt;
