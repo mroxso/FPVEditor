@@ -827,18 +827,23 @@ function Preview({
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string>();
   const [previewStart, setPreviewStart] = useState(0);
+  const [bufferedEnd, setBufferedEnd] = useState(0);
   const selectedId = selectedClip?.id;
   useEffect(() => {
     let active = true;
     // Imports should be instant: the original is already playable and we
     // defer effect-aware rendering until the user enters an edit phase.
     setSource(mode === "clip" && selectedClip ? mediaSource(selectedClip.source_path) : undefined);
-    if (mode === "clip") setPreviewStart(0);
+    if (mode === "clip") {
+      setPreviewStart(0);
+      setBufferedEnd(0);
+    }
     setError(undefined);
     if (mode === "clip" && !selectedId) return;
     if (mode === "clip" && phase === "import") return;
     const start = mode === "timeline" ? playhead : 0;
     setPreviewStart(start);
+    setBufferedEnd(start);
     setRendering(true);
     void invoke<string>("render_preview", {
       clipId: mode === "clip" ? selectedId : null,
@@ -880,6 +885,16 @@ function Preview({
   const seekToPlayhead = (element: HTMLVideoElement) => {
     element.currentTime = Math.min(element.duration || 0, (playhead - previewStart) / 1_000_000);
   };
+  const updateBufferedRange = (element: HTMLVideoElement) => {
+    const ranges = element.buffered;
+    if (!ranges.length) return;
+    setBufferedEnd(previewStart + ranges.end(ranges.length - 1) * 1_000_000);
+  };
+  const clipTime = selectedClip
+    ? Math.max(0, playhead - selectedClip.position + selectedClip.in_point)
+    : 0;
+  const bufferSpan = Math.max(1, bufferedEnd - previewStart);
+  const playheadInBuffer = Math.max(0, Math.min(100, ((playhead - previewStart) / bufferSpan) * 100));
   return (
     <section className="grid min-w-0 grid-rows-[minmax(0,1fr)_56px]">
       <div className="grid place-items-center p-6">
@@ -892,9 +907,11 @@ function Preview({
               ref={video}
               key={source}
               className="absolute inset-0 size-full bg-black object-contain"
-              preload="metadata"
+              preload="auto"
               src={source}
               onLoadedMetadata={(event) => seekToPlayhead(event.currentTarget)}
+              onCanPlay={(event) => updateBufferedRange(event.currentTarget)}
+              onProgress={(event) => updateBufferedRange(event.currentTarget)}
               onTimeUpdate={(event) => setPlayhead(previewStart + event.currentTarget.currentTime * 1_000_000)}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
@@ -937,9 +954,23 @@ function Preview({
               </div>
             </div>
           )}
-          <div className="absolute bottom-3 left-4 right-4 flex justify-between font-mono text-[10px] text-muted-foreground">
-            <span>{timecode(playhead)}</span>
-            <span>{rendering ? "Rendering in background" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
+          <div className="absolute bottom-3 left-4 right-4 space-y-1.5 font-mono text-[10px] text-muted-foreground">
+            <div className="flex justify-between">
+              <span>{timecode(playhead)}</span>
+              <span>{rendering ? "Preparing buffer" : mode === "timeline" ? "Timeline preview" : "Clip preview"}</span>
+            </div>
+            {source && (
+              <>
+                <div className="relative h-1 overflow-hidden rounded-full bg-white/20" aria-label={`Buffered through ${timecode(bufferedEnd)}`}>
+                  <div className="absolute inset-y-0 left-0 bg-emerald-400/80" style={{ width: `${Math.max(0, Math.min(100, ((bufferedEnd - previewStart) / Math.max(1, duration - previewStart)) * 100))}%` }} />
+                  <div className="absolute -top-0.5 size-2 rounded-full bg-white shadow" style={{ left: `calc(${playheadInBuffer}% - 4px)` }} />
+                </div>
+                <div className="flex justify-between text-[9px] uppercase tracking-wider text-white/55">
+                  <span>{selectedClip ? `${fileName(selectedClip.source_path)} · source ${timecode(clipTime)}` : "Timeline"}</span>
+                  <span>Buffer → {timecode(bufferedEnd)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
