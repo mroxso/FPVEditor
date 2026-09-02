@@ -60,6 +60,13 @@ pub struct MediaImportOutcome {
     pub can_redo: bool,
 }
 
+/// The local FFmpeg toolchain status displayed in the Settings diagnostics.
+#[derive(Debug, Serialize)]
+pub struct MediaDiagnostics {
+    pub ffmpeg: fpv_media::ToolDiagnostic,
+    pub ffprobe: fpv_media::ToolDiagnostic,
+}
+
 impl AppState {
     pub fn new(project: Project) -> Self {
         Self {
@@ -140,6 +147,13 @@ impl AppState {
 
     pub fn probe_media(&self, path: &Path) -> Result<fpv_media::MediaInfo> {
         fpv_media::probe(path).context("ffprobe failed")
+    }
+
+    pub fn media_diagnostics(&self) -> MediaDiagnostics {
+        MediaDiagnostics {
+            ffmpeg: fpv_media::process::diagnose("ffmpeg"),
+            ffprobe: fpv_media::process::diagnose("ffprobe"),
+        }
     }
 
     /// Import files or recursively scan folders for video sources. This only

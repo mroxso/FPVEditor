@@ -125,6 +125,15 @@ type UpdateCheckResult = {
   download_url: string | null;
   asset_name: string | null;
 };
+type ToolDiagnostic = {
+  binary: string;
+  path: string;
+  source: string;
+  status: "healthy" | "missing" | "error";
+  version: string | null;
+  message: string;
+};
+type MediaDiagnostics = { ffmpeg: ToolDiagnostic; ffprobe: ToolDiagnostic };
 type WorkflowPhase = "import" | "stabilize" | "cut" | "grade" | "export";
 type EditTool = "select" | "razor";
 type PreviewMode = "clip" | "timeline";
@@ -253,6 +262,8 @@ function App() {
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult>();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
+  const [mediaDiagnostics, setMediaDiagnostics] = useState<MediaDiagnostics>();
+  const [checkingMediaDiagnostics, setCheckingMediaDiagnostics] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState([
     {
@@ -348,6 +359,16 @@ function App() {
       if (!silent) setNotice(`Update check failed: ${String(error)}`);
     } finally {
       setCheckingUpdate(false);
+    }
+  }, []);
+  const checkMediaDiagnostics = useCallback(async () => {
+    setCheckingMediaDiagnostics(true);
+    try {
+      setMediaDiagnostics(await invoke<MediaDiagnostics>("media_diagnostics"));
+    } catch (error) {
+      setNotice(`FFmpeg check failed: ${String(error)}`);
+    } finally {
+      setCheckingMediaDiagnostics(false);
     }
   }, []);
   useEffect(() => {
@@ -769,6 +790,9 @@ function App() {
           downloadingUpdate={downloadingUpdate}
           checkForUpdates={() => checkForUpdates(false)}
           downloadUpdate={downloadUpdate}
+          mediaDiagnostics={mediaDiagnostics}
+          checkingMediaDiagnostics={checkingMediaDiagnostics}
+          checkMediaDiagnostics={checkMediaDiagnostics}
         />
         <Dialog open={returnToOverviewOpen} onOpenChange={setReturnToOverviewOpen}>
           <DialogContent>
@@ -1671,6 +1695,9 @@ function SettingsDialog({
   downloadingUpdate,
   checkForUpdates,
   downloadUpdate,
+  mediaDiagnostics,
+  checkingMediaDiagnostics,
+  checkMediaDiagnostics,
 }: {
   open: boolean;
   setOpen: (value: boolean) => void;
@@ -1689,9 +1716,15 @@ function SettingsDialog({
   downloadingUpdate: boolean;
   checkForUpdates: () => Promise<void>;
   downloadUpdate: () => Promise<void>;
+  mediaDiagnostics?: MediaDiagnostics;
+  checkingMediaDiagnostics: boolean;
+  checkMediaDiagnostics: () => Promise<void>;
 }) {
   const set = (key: keyof Provider, value: string | null) =>
     setProvider({ ...provider, [key]: value });
+  useEffect(() => {
+    if (open && !mediaDiagnostics && !checkingMediaDiagnostics) void checkMediaDiagnostics();
+  }, [open, mediaDiagnostics, checkingMediaDiagnostics, checkMediaDiagnostics]);
   const connectionNotice =
     notice === "Testing AI connection…" ||
     notice === "AI provider connected" ||
@@ -1711,6 +1744,7 @@ function SettingsDialog({
           <TabsList className="w-full">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="ai">AI</TabsTrigger>
+            <TabsTrigger value="media">Media tools</TabsTrigger>
             <TabsTrigger value="updates">Updates</TabsTrigger>
             <TabsTrigger value="info">Info</TabsTrigger>
           </TabsList>
@@ -1777,6 +1811,43 @@ function SettingsDialog({
                 {connectionNotice}
               </p>
             )}
+          </TabsContent>
+          <TabsContent value="media" className="mt-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">FFmpeg diagnostics</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">The tools FPV Editor uses to inspect, preview, and export media.</p>
+              </div>
+              <Button variant="outline" size="sm" disabled={checkingMediaDiagnostics} onClick={() => void checkMediaDiagnostics()}>
+                <RefreshCw data-icon="inline-start" className={checkingMediaDiagnostics ? "animate-spin" : ""} />
+                {checkingMediaDiagnostics ? "Checking…" : "Refresh"}
+              </Button>
+            </div>
+            {mediaDiagnostics ? <div className="space-y-2">
+              {[mediaDiagnostics.ffmpeg, mediaDiagnostics.ffprobe].map((tool) => {
+                const healthy = tool.status === "healthy";
+                const missing = tool.status === "missing";
+                return <Card key={tool.binary} size="sm" className="shadow-none">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <CardTitle className="flex items-center gap-2 text-sm">
+                          <Circle className={healthy ? "size-2 fill-emerald-500 text-emerald-500" : missing ? "size-2 fill-amber-500 text-amber-500" : "size-2 fill-destructive text-destructive"} />
+                          {tool.binary}
+                        </CardTitle>
+                        <CardDescription className="mt-1 text-xs">{tool.message}</CardDescription>
+                      </div>
+                      <Badge variant={healthy ? "secondary" : "outline"} className={healthy ? "text-emerald-700 dark:text-emerald-400" : missing ? "border-amber-500/50 text-amber-700 dark:text-amber-400" : "border-destructive/50 text-destructive"}>{healthy ? "Ready" : missing ? "Missing" : "Needs attention"}</Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-1.5 pt-0 text-[11px] leading-4 text-muted-foreground">
+                    <p><span className="font-medium text-foreground">Selected from:</span> {tool.source}</p>
+                    <p className="break-all font-mono">{tool.path}</p>
+                    {tool.version && <p className="break-words font-mono">{tool.version}</p>}
+                  </CardContent>
+                </Card>;
+              })}
+            </div> : <Card size="sm" className="shadow-none"><CardContent className="flex items-center gap-2 py-4 text-xs text-muted-foreground"><RefreshCw className="size-3 animate-spin" /> Checking installed media tools…</CardContent></Card>}
           </TabsContent>
           <TabsContent value="updates" className="mt-4 space-y-3">
             <Card size="sm" className="shadow-none">

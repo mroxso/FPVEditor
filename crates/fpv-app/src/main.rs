@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use fpv_ai::ProviderConfig;
-use fpv_app::{AppState, ExecuteOutcome, MediaImportOutcome, UpdateCheckResult};
+use fpv_app::{AppState, ExecuteOutcome, MediaDiagnostics, MediaImportOutcome, UpdateCheckResult};
 use fpv_core::{Command, Project};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -60,6 +60,11 @@ async fn save_project(state: State<'_, AppState>, path: String) -> AppResult<()>
 #[tauri::command]
 fn probe_media(state: State<'_, AppState>, path: String) -> AppResult<fpv_media::MediaInfo> {
     app_error(state.probe_media(&PathBuf::from(path)))
+}
+
+#[tauri::command]
+fn media_diagnostics(state: State<'_, AppState>) -> MediaDiagnostics {
+    state.media_diagnostics()
 }
 
 #[tauri::command]
@@ -147,6 +152,7 @@ fn main() {
             new_project,
             save_project,
             probe_media,
+            media_diagnostics,
             import_media,
             render_preview,
             configure_ai,
