@@ -24,8 +24,6 @@ pub enum CoreError {
     NothingToUndo,
     #[error("nothing to redo")]
     NothingToRedo,
-    #[error("track {0} is not empty")]
-    TrackNotEmpty(TrackId),
     #[error("invalid speed ramp: keyframes must be non-empty and time-ordered")]
     InvalidSpeedRamp,
     #[error("serialization error: {0}")]

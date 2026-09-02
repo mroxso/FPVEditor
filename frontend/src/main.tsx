@@ -348,6 +348,7 @@ function App() {
     setProject(outcome.project);
     setUndoable(outcome.can_undo);
     setRedoable(outcome.can_redo);
+    if (selected && !outcome.project.clips[selected]) setSelected(undefined);
     const nextDuration = Math.max(
       1,
       ...Object.values(outcome.project.clips).map(
@@ -467,6 +468,14 @@ function App() {
       kind,
       name: `${kind === "Video" ? "V" : "A"}${project.tracks.filter((track) => track.kind === kind).length + 1}`,
     });
+  const removeTrack = async (track: Track) => {
+    if (
+      track.clip_order.length > 0
+      && !window.confirm(`Delete ${track.name} and its ${track.clip_order.length} clip${track.clip_order.length === 1 ? "" : "s"}?`)
+    ) return;
+    const outcome = await command({ command: "remove_track", track_id: track.id });
+    if (outcome) setNotice(`Removed ${track.name}`);
+  };
   const splitSelected = useCallback(async () => {
     const clip = selected ? project.clips[selected] : undefined;
     if (!clip) {
@@ -837,6 +846,7 @@ function App() {
           onTrimEnd={(clip, newOut) => command({ command: "trim_clip", clip_id: clip.id, new_in: clip.in_point, new_out: newOut })}
           onTrimStart={(clip, newIn, newPosition) => command({ command: "trim_clip_start", clip_id: clip.id, new_in: newIn, new_position: newPosition })}
           onAddTrack={addTrack}
+          onRemoveTrack={removeTrack}
           height={timelineHeight}
           setHeight={(height) => setPreference("timelineHeight", height)}
           grid={timelineGrid}
@@ -1535,6 +1545,7 @@ function Timeline({
   onTrimStart,
   onTrimEnd,
   onAddTrack,
+  onRemoveTrack,
   height,
   setHeight,
   grid,
@@ -1554,6 +1565,7 @@ function Timeline({
   onTrimStart: (clip: Clip, newIn: number, newPosition: number) => Promise<Outcome | undefined>;
   onTrimEnd: (clip: Clip, newOut: number) => Promise<Outcome | undefined>;
   onAddTrack: (kind: TrackKind) => Promise<Outcome | undefined>;
+  onRemoveTrack: (track: Track) => Promise<void>;
   height: number;
   setHeight: (height: number) => void;
   grid: TimelineGrid;
@@ -1766,11 +1778,18 @@ function Timeline({
             data-track-id={track.id}
             className="grid h-16 grid-cols-[148px_1fr] border-b"
           >
-            <div className="border-r px-4 py-3">
+            <div className="group/track-header relative border-r px-4 py-3">
               <p className="font-mono text-xs">{track.name}</p>
               <p className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                 {track.kind}
               </p>
+              <IconButton
+                label={`Delete ${track.name} track`}
+                className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/track-header:opacity-100 group-focus-within/track-header:opacity-100"
+                onClick={() => void onRemoveTrack(track)}
+              >
+                <Trash2 />
+              </IconButton>
             </div>
             <div
               className="timeline-lane relative"
