@@ -33,6 +33,25 @@ server, so every timeline change uses the same command bus with undo/redo suppor
 
 ## Getting started
 
+### Install the desktop app
+
+If you want the visual FPV Editor, download a pre-built installer from the
+[latest GitHub release](https://github.com/mroxso/FPVEditor/releases/latest).
+You do not need Git, Rust, Cargo, Node.js, or npm.
+
+Choose the file that matches your computer:
+
+| Platform | Download | Install |
+| --- | --- | --- |
+| macOS on Apple Silicon | `FPV.Editor_*_aarch64.dmg` | Open the DMG, then drag **FPV Editor** to **Applications**. |
+| Windows (64-bit) | `FPV.Editor_*_x64_en-US.msi` | Open the MSI file and follow the installer. |
+| Ubuntu or Debian (64-bit) | `FPV.Editor_*_amd64.deb` | Run `sudo apt install ./FPV.Editor_*_amd64.deb` from the download directory. |
+| Other Linux distributions (64-bit) | `FPV.Editor_*_amd64.AppImage` | Run `chmod +x FPV.Editor_*_amd64.AppImage`, then start it with `./FPV.Editor_*_amd64.AppImage`. |
+
+macOS pre-built releases currently support Apple Silicon only. After
+installation, open **FPV Editor** from Applications, the Windows Start menu, or
+your Linux application launcher.
+
 ### Install the CLI (recommended)
 
 For most users, the standalone CLI is the easiest way to start. It does not
