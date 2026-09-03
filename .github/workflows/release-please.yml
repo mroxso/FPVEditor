@@ -46,10 +46,10 @@ jobs:
             git push
           fi
 
-  publish-release:
+  release-build:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    uses: ./.github/workflows/publish-release.yml
+    uses: ./.github/workflows/release-build.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
     secrets: inherit
