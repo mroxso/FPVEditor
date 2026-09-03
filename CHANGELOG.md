@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/mroxso/FPVEditor/compare/v0.11.0...v0.11.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **ci:** fix Docker GHCR publish being skipped on release ([#76](https://github.com/mroxso/FPVEditor/issues/76)) ([724613b](https://github.com/mroxso/FPVEditor/commit/724613b38eb6de9e1b898fd7d0b93d296beb98fa))
+
 ## [0.11.0](https://github.com/mroxso/FPVEditor/compare/v0.10.1...v0.11.0) (2026-09-03)
 
 
