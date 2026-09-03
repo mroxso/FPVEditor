@@ -1,0 +1,40 @@
+name: Docker build check
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+      - .github/workflows/docker-ci.yml
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+      - .github/workflows/docker-ci.yml
+
+jobs:
+  build:
+    name: Build and verify image
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: fpveditor-cli:ci
+      - name: Verify container runs fpv --help
+        run: docker run --rm fpveditor-cli:ci --help
