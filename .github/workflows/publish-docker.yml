@@ -40,12 +40,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      # inputs.tag (not github.event_name) distinguishes the workflow_call
+      # path: release-please.yml invokes this two levels deep via
+      # publish-release.yml, and github.event_name reflects the outermost
+      # trigger (push) rather than workflow_call in that case.
       - uses: actions/checkout@v4
-        if: github.event_name == 'workflow_call'
+        if: inputs.tag != ''
         with:
           ref: ${{ inputs.source_ref || inputs.tag }}
       - uses: actions/checkout@v4
-        if: github.event_name != 'workflow_call'
+        if: inputs.tag == ''
       - uses: docker/setup-buildx-action@v3
       - name: Build image (linux/amd64)
         uses: docker/build-push-action@v6
@@ -60,7 +64,7 @@ jobs:
 
   publish:
     name: Publish image to GHCR
-    if: github.event_name == 'workflow_call'
+    if: inputs.tag != ''
     needs: build
     runs-on: ubuntu-22.04
     permissions:
