@@ -170,6 +170,10 @@ jobs:
           TAG: ${{ inputs.tag }}
       - name: Build and push
         uses: docker/build-push-action@v6
+        env:
+          # The build record is an internal debugging artifact, not a release
+          # asset; uploading it only adds noise to the run's artifact list.
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           context: .
           push: true
@@ -183,8 +187,20 @@ jobs:
     needs: [desktop, cli]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      # Download only the artifacts this job publishes. Downloading everything
+      # also pulls in unrelated artifacts such as the `.dockerbuild` build
+      # record from docker/build-push-action, which fails the job and would be
+      # attached to the release.
+      - name: Download desktop bundles
+        uses: actions/download-artifact@v4
         with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+      - name: Download CLI archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fpv-cli-*
           path: release-assets
           merge-multiple: true
       - name: Generate CLI checksums
