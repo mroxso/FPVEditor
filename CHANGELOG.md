@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/mroxso/FPVEditor/compare/v0.11.1...v0.11.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **ci:** only download release assets when attaching them ([#79](https://github.com/mroxso/FPVEditor/issues/79)) ([2bfd0a5](https://github.com/mroxso/FPVEditor/commit/2bfd0a5ae13e0f9b7788af5a78c9a8135efa5597))
+
 ## [0.11.1](https://github.com/mroxso/FPVEditor/compare/v0.11.0...v0.11.1) (2026-09-03)
 
 
