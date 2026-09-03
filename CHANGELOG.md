@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.0](https://github.com/mroxso/FPVEditor/compare/v0.10.1...v0.11.0) (2026-09-03)
+
+
+### Features
+
+* persist AI provider settings ([#70](https://github.com/mroxso/FPVEditor/issues/70)) ([2071888](https://github.com/mroxso/FPVEditor/commit/2071888ebd07ad106164d0a17c29e96437d4130e))
+* publish fpv-cli Docker image to GHCR ([#73](https://github.com/mroxso/FPVEditor/issues/73)) ([f70b6a4](https://github.com/mroxso/FPVEditor/commit/f70b6a456379d3f63899e88ed6c936872f57e911))
+
+
+### Bug Fixes
+
+* **ci:** grant packages:write to release-please caller workflow ([#74](https://github.com/mroxso/FPVEditor/issues/74)) ([a5fbd7a](https://github.com/mroxso/FPVEditor/commit/a5fbd7a8d3cab218e5d16d4a31a6933f76f57a9e))
+* **ci:** sync Cargo.lock when release-please bumps the version ([#75](https://github.com/mroxso/FPVEditor/issues/75)) ([7a625fb](https://github.com/mroxso/FPVEditor/commit/7a625fbed544d4f7c6d06fb80fd31c8b6bfbf9df))
+
 ## [0.10.1](https://github.com/mroxso/FPVEditor/compare/v0.10.0...v0.10.1) (2026-09-02)
 
 
